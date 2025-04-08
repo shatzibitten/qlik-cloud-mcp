@@ -1,27 +1,46 @@
-FROM node:16-alpine
+FROM node:16-alpine AS builder
 
-# Create app directory
 WORKDIR /app
 
-# Install dependencies
+# Copy package files and install dependencies
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm ci
 
-# Copy application code
-COPY dist/ ./dist/
-COPY docs/ ./docs/
+# Copy source code
+COPY . .
 
-# Create config directory
-RUN mkdir -p config logs
+# Build the application
+RUN npm run build
 
-# Set environment variables
-ENV NODE_ENV=production
+# Production image
+FROM node:16-alpine
 
-# Expose port
+WORKDIR /app
+
+# Copy built application from builder stage
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package*.json ./
+
+# Create non-root user for security
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
+# Create directories for configuration and data
+RUN mkdir -p config data
+RUN chown -R appuser:appgroup config data
+
+# Set volumes for persistent data
+VOLUME ["/app/config", "/app/data"]
+
+# Switch to non-root user
+USER appuser
+
+# Expose the application port
 EXPOSE 3000
 
-# Set user to node for security
-USER node
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+  CMD wget -q -O - http://localhost:3000/health || exit 1
 
-# Start the server
+# Start the application
 CMD ["node", "dist/server.js"]

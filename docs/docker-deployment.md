@@ -1,267 +1,423 @@
 # Docker Deployment Guide
 
-This guide provides detailed information on deploying the Qlik Cloud MCP server using Docker.
-
-## Overview
-
-Docker provides a convenient way to deploy the Qlik Cloud MCP server in a containerized environment. This approach ensures consistency across different environments and simplifies deployment.
+This guide provides detailed instructions for deploying the Qlik Cloud Model Context Protocol (MCP) server using Docker.
 
 ## Prerequisites
 
-Before deploying the Qlik Cloud MCP server with Docker, ensure you have:
+Before deploying the MCP server with Docker, ensure you have the following:
 
-- Docker installed (version 20.10.0 or later)
-- Docker Compose installed (version 2.0.0 or later, optional but recommended)
-- Access to a Qlik Cloud tenant with appropriate permissions
-- API credentials (OAuth2 client credentials, JWT key, or API key)
+- **Docker**: Version 20.10.0 or later
+- **Docker Compose**: Version 2.0.0 or later (optional, for Docker Compose deployment)
+- **Qlik Cloud Tenant**: Access to a Qlik Cloud tenant
+- **API Credentials**: Either an API key or OAuth2 credentials for your Qlik Cloud tenant
 
-## Docker Image
+## Quick Start with Docker
 
-The Qlik Cloud MCP server is available as a Docker image on Docker Hub:
-
-```
-yourusername/qlik-cloud-mcp:latest
-```
-
-The image is based on Node.js 16 and includes all the dependencies required to run the MCP server.
-
-## Running with Docker
-
-### Basic Usage
-
-The simplest way to run the MCP server with Docker is:
+### 1. Pull the Docker Image
 
 ```bash
-docker run -p 3000:3000 \
-  -e MCP_AUTH_OAUTH2_ENABLED=true \
-  -e MCP_AUTH_OAUTH2_CLIENT_ID=your-client-id \
-  -e MCP_AUTH_OAUTH2_CLIENT_SECRET=your-client-secret \
-  -e MCP_AUTH_OAUTH2_TOKEN_URL=https://your-tenant.us.qlikcloud.com/oauth/token \
-  -e MCP_API_BASE_URL=https://your-tenant.us.qlikcloud.com \
-  -e MCP_WEBHOOK_SECRET=your-webhook-secret \
-  yourusername/qlik-cloud-mcp
+docker pull shatzibitten/qlik-cloud-mcp:latest
 ```
 
-This will start the MCP server on port 3000 with OAuth2 authentication enabled.
+### 2. Create Configuration
 
-### Using a Configuration File
-
-You can also use a configuration file with Docker:
+Create a directory for configuration files:
 
 ```bash
-# Create a configuration directory
-mkdir -p ~/qlik-cloud-mcp/config
-
-# Create a configuration file
-cat > ~/qlik-cloud-mcp/config/config.json << EOF
-{
-  "server": {
-    "port": 3000,
-    "host": "0.0.0.0",
-    "baseUrl": "http://localhost:3000"
-  },
-  "auth": {
-    "oauth2": {
-      "enabled": true,
-      "clientId": "your-client-id",
-      "clientSecret": "your-client-secret",
-      "tokenUrl": "https://your-tenant.us.qlikcloud.com/oauth/token"
-    }
-  },
-  "api": {
-    "baseUrl": "https://your-tenant.us.qlikcloud.com",
-    "timeout": 30000
-  },
-  "webhook": {
-    "secret": "your-webhook-secret"
-  }
-}
-EOF
-
-# Run the container with the configuration file
-docker run -p 3000:3000 \
-  -v ~/qlik-cloud-mcp/config:/app/config \
-  yourusername/qlik-cloud-mcp
+mkdir -p qlik-cloud-mcp/config
 ```
 
-### Persisting Data
-
-To persist data between container restarts, you can mount a volume for the logs directory:
+Create a `.env` file in the config directory:
 
 ```bash
-docker run -p 3000:3000 \
-  -v ~/qlik-cloud-mcp/config:/app/config \
-  -v ~/qlik-cloud-mcp/logs:/app/logs \
-  yourusername/qlik-cloud-mcp
+cat > qlik-cloud-mcp/config/.env << EOL
+# Server Configuration
+PORT=3000
+LOG_LEVEL=info
+NODE_ENV=production
+
+# Qlik Cloud Configuration
+QLIK_CLOUD_BASE_URL=https://your-tenant.us.qlikcloud.com
+QLIK_CLOUD_TENANT_ID=your-tenant-id
+QLIK_CLOUD_AUTH_TYPE=oauth2  # oauth2, jwt, or apikey
+
+# Authentication Configuration
+OAUTH2_CLIENT_ID=your-client-id
+OAUTH2_CLIENT_SECRET=your-client-secret
+OAUTH2_TOKEN_URL=https://your-tenant.us.qlikcloud.com/oauth/token
+
+# JWT Configuration (if using JWT)
+JWT_SECRET=your-jwt-secret
+JWT_ISSUER=your-jwt-issuer
+JWT_AUDIENCE=your-jwt-audience
+
+# API Key Configuration (if using API key)
+API_KEY=your-api-key
+EOL
 ```
 
-## Docker Compose
+Edit the `.env` file with your Qlik Cloud tenant information and credentials.
 
-For more complex deployments, you can use Docker Compose:
+### 3. Create Data Directory
 
-```yaml
-version: '3'
+Create a directory for persistent data:
+
+```bash
+mkdir -p qlik-cloud-mcp/data
+```
+
+### 4. Run the Docker Container
+
+```bash
+docker run -d \
+  --name qlik-cloud-mcp \
+  -p 3000:3000 \
+  -v $(pwd)/qlik-cloud-mcp/config:/app/config \
+  -v $(pwd)/qlik-cloud-mcp/data:/app/data \
+  shatzibitten/qlik-cloud-mcp:latest
+```
+
+### 5. Verify the Deployment
+
+Check that the container is running:
+
+```bash
+docker ps
+```
+
+Access the health endpoint to verify the server is working:
+
+```bash
+curl http://localhost:3000/health
+```
+
+## Deployment with Docker Compose
+
+### 1. Create Docker Compose File
+
+Create a `docker-compose.yml` file:
+
+```bash
+cat > docker-compose.yml << EOL
+version: '3.8'
+
 services:
   qlik-cloud-mcp:
-    image: yourusername/qlik-cloud-mcp
+    image: shatzibitten/qlik-cloud-mcp:latest
+    container_name: qlik-cloud-mcp
     ports:
       - "3000:3000"
-    environment:
-      - MCP_AUTH_OAUTH2_ENABLED=true
-      - MCP_AUTH_OAUTH2_CLIENT_ID=your-client-id
-      - MCP_AUTH_OAUTH2_CLIENT_SECRET=your-client-secret
-      - MCP_AUTH_OAUTH2_TOKEN_URL=https://your-tenant.us.qlikcloud.com/oauth/token
-      - MCP_API_BASE_URL=https://your-tenant.us.qlikcloud.com
-      - MCP_WEBHOOK_SECRET=your-webhook-secret
     volumes:
       - ./config:/app/config
-      - ./logs:/app/logs
+      - ./data:/app/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    environment:
+      - NODE_ENV=production
+EOL
 ```
 
-Save this as `docker-compose.yml` and run:
+### 2. Create Configuration
+
+Create the configuration directory and `.env` file as described in the Quick Start section.
+
+### 3. Start the Services
 
 ```bash
 docker-compose up -d
 ```
 
-This will start the MCP server in detached mode.
-
-## Environment Variables
-
-You can configure the MCP server using environment variables. See the [Configuration Guide](./configuration.md) for a complete list of environment variables.
-
-## Building the Docker Image
-
-If you want to build the Docker image yourself:
+### 4. Verify the Deployment
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/qlik-cloud-mcp.git
-
-# Navigate to the project directory
-cd qlik-cloud-mcp
-
-# Build the Docker image
-docker build -t yourusername/qlik-cloud-mcp .
+docker-compose ps
 ```
 
-## Production Deployment
+## Building a Custom Docker Image
 
-For production deployments, consider the following:
+If you want to build a custom Docker image:
+
+### 1. Clone the Repository
+
+```bash
+git clone https://github.com/shatzibitten/qlik-cloud-mcp.git
+cd qlik-cloud-mcp
+```
+
+### 2. Customize the Dockerfile
+
+The Dockerfile is already configured for optimal deployment, but you can customize it if needed:
+
+```dockerfile
+FROM node:16-alpine AS builder
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci
+
+COPY . .
+RUN npm run build
+
+FROM node:16-alpine
+
+WORKDIR /app
+
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package*.json ./
+
+# Create non-root user
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+USER appuser
+
+# Create directories
+RUN mkdir -p config data
+VOLUME ["/app/config", "/app/data"]
+
+EXPOSE 3000
+
+CMD ["node", "dist/server.js"]
+```
+
+### 3. Build the Docker Image
+
+```bash
+docker build -t qlik-cloud-mcp:custom .
+```
+
+### 4. Run the Custom Image
+
+```bash
+docker run -d \
+  --name qlik-cloud-mcp \
+  -p 3000:3000 \
+  -v $(pwd)/config:/app/config \
+  -v $(pwd)/data:/app/data \
+  qlik-cloud-mcp:custom
+```
+
+## Advanced Docker Configuration
+
+### Environment Variables
+
+All configuration options can be set using environment variables in the Docker run command:
+
+```bash
+docker run -d \
+  --name qlik-cloud-mcp \
+  -p 3000:3000 \
+  -e PORT=3000 \
+  -e LOG_LEVEL=info \
+  -e NODE_ENV=production \
+  -e QLIK_CLOUD_BASE_URL=https://your-tenant.us.qlikcloud.com \
+  -e QLIK_CLOUD_TENANT_ID=your-tenant-id \
+  -e QLIK_CLOUD_AUTH_TYPE=oauth2 \
+  -e OAUTH2_CLIENT_ID=your-client-id \
+  -e OAUTH2_CLIENT_SECRET=your-client-secret \
+  -e OAUTH2_TOKEN_URL=https://your-tenant.us.qlikcloud.com/oauth/token \
+  shatzibitten/qlik-cloud-mcp:latest
+```
+
+### Docker Networking
+
+To isolate the MCP server in its own network:
+
+```bash
+# Create a network
+docker network create qlik-cloud-network
+
+# Run the container in the network
+docker run -d \
+  --name qlik-cloud-mcp \
+  --network qlik-cloud-network \
+  -p 3000:3000 \
+  -v $(pwd)/qlik-cloud-mcp/config:/app/config \
+  -v $(pwd)/qlik-cloud-mcp/data:/app/data \
+  shatzibitten/qlik-cloud-mcp:latest
+```
+
+### Docker Compose with Multiple Services
+
+For a more complex setup with additional services:
+
+```yaml
+version: '3.8'
+
+services:
+  qlik-cloud-mcp:
+    image: shatzibitten/qlik-cloud-mcp:latest
+    container_name: qlik-cloud-mcp
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    environment:
+      - NODE_ENV=production
+    networks:
+      - qlik-cloud-network
+
+  # Optional Redis for caching
+  redis:
+    image: redis:alpine
+    container_name: qlik-cloud-redis
+    restart: unless-stopped
+    networks:
+      - qlik-cloud-network
+
+networks:
+  qlik-cloud-network:
+    driver: bridge
+```
+
+## Production Deployment Considerations
 
 ### Security
 
-- Use HTTPS in production to protect data in transit
-- Store sensitive information (client secrets, API keys) securely
-- Use a reverse proxy (e.g., Nginx) to handle SSL termination
-- Limit access to the MCP server using network security groups
+For production deployments, consider the following security measures:
+
+1. **Use HTTPS**: Deploy behind a reverse proxy like Nginx or Traefik with SSL/TLS.
+2. **Secure Secrets**: Use Docker secrets or a vault service for sensitive information.
+3. **Non-Root User**: The Docker image already runs as a non-root user.
+4. **Network Isolation**: Use Docker networks to isolate services.
+5. **Resource Limits**: Set memory and CPU limits for the container.
+
+Example with resource limits:
+
+```bash
+docker run -d \
+  --name qlik-cloud-mcp \
+  -p 3000:3000 \
+  -v $(pwd)/qlik-cloud-mcp/config:/app/config \
+  -v $(pwd)/qlik-cloud-mcp/data:/app/data \
+  --memory="512m" \
+  --cpus="0.5" \
+  shatzibitten/qlik-cloud-mcp:latest
+```
 
 ### High Availability
 
-- Deploy multiple instances of the MCP server behind a load balancer
-- Use a container orchestration platform (e.g., Kubernetes) for automatic scaling and failover
-- Monitor the MCP server for health and performance
+For high availability:
 
-### Example Nginx Configuration
+1. **Multiple Instances**: Run multiple instances behind a load balancer.
+2. **Health Checks**: Use Docker health checks to monitor container health.
+3. **Automatic Restart**: Configure restart policies for containers.
+4. **External State Storage**: Use external storage for state persistence.
 
-```nginx
-server {
-    listen 443 ssl;
-    server_name mcp.example.com;
+### Monitoring
 
-    ssl_certificate /path/to/certificate.crt;
-    ssl_certificate_key /path/to/private.key;
+For monitoring:
 
-    location / {
-        proxy_pass http://localhost:3000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-```
+1. **Container Logs**: Collect logs using Docker's logging drivers.
+2. **Metrics**: Expose metrics for Prometheus.
+3. **Health Checks**: Regularly check the `/health` endpoint.
 
-### Example Kubernetes Deployment
+Example with log configuration:
 
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: qlik-cloud-mcp
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: qlik-cloud-mcp
-  template:
-    metadata:
-      labels:
-        app: qlik-cloud-mcp
-    spec:
-      containers:
-      - name: qlik-cloud-mcp
-        image: yourusername/qlik-cloud-mcp
-        ports:
-        - containerPort: 3000
-        env:
-        - name: MCP_AUTH_OAUTH2_ENABLED
-          value: "true"
-        - name: MCP_AUTH_OAUTH2_CLIENT_ID
-          valueFrom:
-            secretKeyRef:
-              name: qlik-cloud-mcp-secrets
-              key: oauth2-client-id
-        - name: MCP_AUTH_OAUTH2_CLIENT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: qlik-cloud-mcp-secrets
-              key: oauth2-client-secret
-        - name: MCP_AUTH_OAUTH2_TOKEN_URL
-          value: "https://your-tenant.us.qlikcloud.com/oauth/token"
-        - name: MCP_API_BASE_URL
-          value: "https://your-tenant.us.qlikcloud.com"
-        - name: MCP_WEBHOOK_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: qlik-cloud-mcp-secrets
-              key: webhook-secret
+```bash
+docker run -d \
+  --name qlik-cloud-mcp \
+  -p 3000:3000 \
+  -v $(pwd)/qlik-cloud-mcp/config:/app/config \
+  -v $(pwd)/qlik-cloud-mcp/data:/app/data \
+  --log-driver=json-file \
+  --log-opt max-size=10m \
+  --log-opt max-file=3 \
+  shatzibitten/qlik-cloud-mcp:latest
 ```
 
 ## Troubleshooting
 
-### Common Issues
+### Common Docker Issues
 
 #### Container Fails to Start
 
-- Check the container logs: `docker logs <container-id>`
-- Verify that all required environment variables are set
-- Ensure that the configuration file is mounted correctly
+Check the container logs:
 
-#### Container Starts but API Requests Fail
+```bash
+docker logs qlik-cloud-mcp
+```
 
-- Check that the API base URL is correct
-- Verify that the authentication credentials are valid
-- Ensure that the container can access the Qlik Cloud API
+#### Configuration Issues
 
-#### Webhook Events Are Not Processed
+Verify your configuration file:
 
-- Check that the webhook secret is correct
-- Verify that the webhook URL in Qlik Cloud is accessible from the internet
-- Ensure that the container is running and accessible
+```bash
+docker exec -it qlik-cloud-mcp cat /app/config/.env
+```
+
+#### Permission Issues
+
+Check volume permissions:
+
+```bash
+docker exec -it qlik-cloud-mcp ls -la /app/data
+```
+
+#### Network Issues
+
+Check if the container can reach the Qlik Cloud tenant:
+
+```bash
+docker exec -it qlik-cloud-mcp ping your-tenant.us.qlikcloud.com
+```
+
+#### Resource Constraints
+
+Check if the container is hitting resource limits:
+
+```bash
+docker stats qlik-cloud-mcp
+```
+
+For more troubleshooting information, see the [Troubleshooting Guide](./troubleshooting.md).
+
+## Updating the MCP Server
+
+To update to a new version of the MCP server:
+
+```bash
+# Pull the latest image
+docker pull shatzibitten/qlik-cloud-mcp:latest
+
+# Stop and remove the current container
+docker stop qlik-cloud-mcp
+docker rm qlik-cloud-mcp
+
+# Run a new container with the latest image
+docker run -d \
+  --name qlik-cloud-mcp \
+  -p 3000:3000 \
+  -v $(pwd)/qlik-cloud-mcp/config:/app/config \
+  -v $(pwd)/qlik-cloud-mcp/data:/app/data \
+  shatzibitten/qlik-cloud-mcp:latest
+```
+
+With Docker Compose:
+
+```bash
+docker-compose pull
+docker-compose up -d
+```
 
 ## Next Steps
 
-After deploying the Qlik Cloud MCP server with Docker, you can:
+After deploying with Docker, you may want to:
 
-1. Configure authentication with your Qlik Cloud tenant
-2. Set up webhook events in Qlik Cloud
-3. Test API requests through the MCP server
-
-For more information, see the following guides:
-
-- [Configuration Guide](./configuration.md)
-- [Authentication Guide](./authentication.md)
-- [API Reference](./api-reference.md)
-- [Webhook Events Guide](./webhook-events.md)
+1. [Configure authentication](./authentication.md)
+2. [Learn about model context](./model-context.md)
+3. [Explore the API reference](./api-reference.md)
+4. [Set up monitoring and logging](./troubleshooting.md)

@@ -1,280 +1,290 @@
-import { BaseResourceClient } from './resource-client';
+import { QlikCloudAPIClient, QlikCloudAPIClientConfig } from './qlik-cloud-api-client';
+import { AuthManager } from '../auth/auth-manager';
+import { LogManager } from '../utils/log-manager';
 
 /**
- * Content interface
+ * Interface for Qlik Cloud data connection
  */
-export interface Content {
+export interface QlikCloudDataConnection {
   id: string;
   name: string;
   description?: string;
-  resourceType: string;
-  resourceId: string;
-  resourceAttributes: Record<string, any>;
-  resourceCreatedAt: string;
-  resourceUpdatedAt: string;
+  type: string;
+  createdDate: string;
+  modifiedDate: string;
   owner: {
     id: string;
     name: string;
-    userId: string;
   };
-  links: {
-    self: {
-      href: string;
-    };
-  };
+  connectionString?: string;
+  username?: string;
+  qlikUsername?: string;
 }
 
 /**
- * Content client class
- * Implements resource client for content
+ * Interface for Qlik Cloud extension
  */
-export class ContentClient extends BaseResourceClient<Content> {
-  /**
-   * Constructor
-   * @param apiClient API client
-   * @param authType Authentication type to use
-   */
-  constructor(apiClient: any, authType: string) {
-    super(apiClient, '/v1/items', authType);
-  }
-  
-  /**
-   * Search content
-   * @param query Search query
-   * @returns Promise resolving to matching content
-   */
-  async search(query: Record<string, any>): Promise<Content[]> {
-    const response = await this.apiClient.request({
-      method: 'POST',
-      path: `${this.basePath}/search`,
-      body: query
-    }, this.authType);
-    
-    return response.body.data || [];
-  }
-  
-  /**
-   * Get content by resource type
-   * @param resourceType Resource type
-   * @param params Query parameters
-   * @returns Promise resolving to matching content
-   */
-  async getByResourceType(resourceType: string, params?: Record<string, string>): Promise<Content[]> {
-    const query = {
-      ...params,
-      resourceType
-    };
-    
-    const response = await this.apiClient.request({
-      method: 'GET',
-      path: this.basePath,
-      query
-    }, this.authType);
-    
-    return response.body.data || [];
-  }
-}
-
-/**
- * Collection interface
- */
-export interface Collection {
+export interface QlikCloudExtension {
   id: string;
   name: string;
   description?: string;
-  type: 'public' | 'private';
-  ownerId: string;
-  created: string;
-  updated: string;
-  itemCount: number;
-}
-
-/**
- * Collection client class
- * Implements resource client for collections
- */
-export class CollectionClient extends BaseResourceClient<Collection> {
-  /**
-   * Constructor
-   * @param apiClient API client
-   * @param authType Authentication type to use
-   */
-  constructor(apiClient: any, authType: string) {
-    super(apiClient, '/v1/collections', authType);
-  }
-  
-  /**
-   * Get collection items
-   * @param id Collection ID
-   * @param params Query parameters
-   * @returns Promise resolving to collection items
-   */
-  async getItems(id: string, params?: Record<string, string>): Promise<any[]> {
-    const response = await this.apiClient.request({
-      method: 'GET',
-      path: `${this.basePath}/${id}/items`,
-      query: params
-    }, this.authType);
-    
-    return response.body.data || [];
-  }
-  
-  /**
-   * Add item to collection
-   * @param id Collection ID
-   * @param itemId Item ID
-   * @returns Promise resolving when item is added
-   */
-  async addItem(id: string, itemId: string): Promise<void> {
-    await this.apiClient.request({
-      method: 'POST',
-      path: `${this.basePath}/${id}/items`,
-      body: {
-        id: itemId
-      }
-    }, this.authType);
-  }
-  
-  /**
-   * Remove item from collection
-   * @param id Collection ID
-   * @param itemId Item ID
-   * @returns Promise resolving when item is removed
-   */
-  async removeItem(id: string, itemId: string): Promise<void> {
-    await this.apiClient.request({
-      method: 'DELETE',
-      path: `${this.basePath}/${id}/items/${itemId}`
-    }, this.authType);
-  }
-}
-
-/**
- * Report interface
- */
-export interface Report {
-  id: string;
-  title: string;
-  description?: string;
-  created: string;
-  lastUpdated: string;
-  ownerId: string;
-  status: 'active' | 'inactive' | 'draft';
-  schedule?: {
-    frequency: 'daily' | 'weekly' | 'monthly';
-    startDate: string;
-    timeZone: string;
-    dayOfWeek?: number;
-    dayOfMonth?: number;
-    time: string;
+  version: string;
+  createdDate: string;
+  modifiedDate: string;
+  owner: {
+    id: string;
+    name: string;
   };
 }
 
 /**
- * Report client class
- * Implements resource client for reports
+ * QlikCloudDataConnectionClient class for interacting with Qlik Cloud data connection APIs
+ * 
+ * This class provides methods for working with data connections in Qlik Cloud,
+ * which are essential for model context operations.
  */
-export class ReportClient extends BaseResourceClient<Report> {
+export class QlikCloudDataConnectionClient {
+  private _apiClient: QlikCloudAPIClient;
+  private _logger: LogManager;
+
   /**
-   * Constructor
-   * @param apiClient API client
-   * @param authType Authentication type to use
+   * Creates a new QlikCloudDataConnectionClient instance
+   * 
+   * @param apiClient - Qlik Cloud API client
+   * @param logger - Logger
    */
-  constructor(apiClient: any, authType: string) {
-    super(apiClient, '/v1/reports', authType);
+  constructor(
+    apiClient: QlikCloudAPIClient,
+    logger: LogManager
+  ) {
+    this._apiClient = apiClient;
+    this._logger = logger;
   }
-  
+
   /**
-   * Generate a report
-   * @param id Report ID
-   * @returns Promise resolving to the generated report
+   * Get all data connections
+   * 
+   * @returns Promise that resolves with an array of data connections
    */
-  async generate(id: string): Promise<any> {
-    const response = await this.apiClient.request({
-      method: 'POST',
-      path: `${this.basePath}/${id}/generate`
-    }, this.authType);
-    
-    return response.body;
+  async getDataConnections(): Promise<QlikCloudDataConnection[]> {
+    try {
+      const response = await this._apiClient.get<{ data: QlikCloudDataConnection[] }>('/data-connections');
+      return response.data || [];
+    } catch (error) {
+      this._logger.error('Failed to get data connections', { error });
+      throw error;
+    }
   }
-  
+
   /**
-   * Get report executions
-   * @param id Report ID
-   * @param params Query parameters
-   * @returns Promise resolving to report executions
+   * Get a data connection by ID
+   * 
+   * @param connectionId - ID of the data connection to get
+   * @returns Promise that resolves with the data connection
    */
-  async getExecutions(id: string, params?: Record<string, string>): Promise<any[]> {
-    const response = await this.apiClient.request({
-      method: 'GET',
-      path: `${this.basePath}/${id}/executions`,
-      query: params
-    }, this.authType);
-    
-    return response.body.data || [];
+  async getDataConnection(connectionId: string): Promise<QlikCloudDataConnection> {
+    try {
+      const response = await this._apiClient.get<QlikCloudDataConnection>(`/data-connections/${connectionId}`);
+      return response;
+    } catch (error) {
+      this._logger.error('Failed to get data connection', { connectionId, error });
+      throw error;
+    }
+  }
+
+  /**
+   * Create a data connection
+   * 
+   * @param connection - Data connection to create
+   * @returns Promise that resolves with the created data connection
+   */
+  async createDataConnection(connection: Partial<QlikCloudDataConnection>): Promise<QlikCloudDataConnection> {
+    try {
+      const response = await this._apiClient.post<QlikCloudDataConnection>('/data-connections', connection);
+      return response;
+    } catch (error) {
+      this._logger.error('Failed to create data connection', { error });
+      throw error;
+    }
+  }
+
+  /**
+   * Update a data connection
+   * 
+   * @param connectionId - ID of the data connection to update
+   * @param connection - Updated data connection
+   * @returns Promise that resolves with the updated data connection
+   */
+  async updateDataConnection(connectionId: string, connection: Partial<QlikCloudDataConnection>): Promise<QlikCloudDataConnection> {
+    try {
+      const response = await this._apiClient.put<QlikCloudDataConnection>(`/data-connections/${connectionId}`, connection);
+      return response;
+    } catch (error) {
+      this._logger.error('Failed to update data connection', { connectionId, error });
+      throw error;
+    }
+  }
+
+  /**
+   * Delete a data connection
+   * 
+   * @param connectionId - ID of the data connection to delete
+   * @returns Promise that resolves when the data connection is deleted
+   */
+  async deleteDataConnection(connectionId: string): Promise<void> {
+    try {
+      await this._apiClient.delete(`/data-connections/${connectionId}`);
+    } catch (error) {
+      this._logger.error('Failed to delete data connection', { connectionId, error });
+      throw error;
+    }
   }
 }
 
 /**
- * Automation interface
+ * QlikCloudExtensionClient class for interacting with Qlik Cloud extension APIs
+ * 
+ * This class provides methods for working with extensions in Qlik Cloud,
+ * which can be used to extend model context functionality.
  */
-export interface Automation {
-  id: string;
-  name: string;
-  description?: string;
-  created: string;
-  lastUpdated: string;
-  ownerId: string;
-  status: 'active' | 'inactive' | 'draft';
-  triggers: Array<{
-    type: 'schedule' | 'event';
-    config: Record<string, any>;
-  }>;
-  actions: Array<{
-    type: string;
-    config: Record<string, any>;
-  }>;
+export class QlikCloudExtensionClient {
+  private _apiClient: QlikCloudAPIClient;
+  private _logger: LogManager;
+
+  /**
+   * Creates a new QlikCloudExtensionClient instance
+   * 
+   * @param apiClient - Qlik Cloud API client
+   * @param logger - Logger
+   */
+  constructor(
+    apiClient: QlikCloudAPIClient,
+    logger: LogManager
+  ) {
+    this._apiClient = apiClient;
+    this._logger = logger;
+  }
+
+  /**
+   * Get all extensions
+   * 
+   * @returns Promise that resolves with an array of extensions
+   */
+  async getExtensions(): Promise<QlikCloudExtension[]> {
+    try {
+      const response = await this._apiClient.get<{ data: QlikCloudExtension[] }>('/extensions');
+      return response.data || [];
+    } catch (error) {
+      this._logger.error('Failed to get extensions', { error });
+      throw error;
+    }
+  }
+
+  /**
+   * Get an extension by ID
+   * 
+   * @param extensionId - ID of the extension to get
+   * @returns Promise that resolves with the extension
+   */
+  async getExtension(extensionId: string): Promise<QlikCloudExtension> {
+    try {
+      const response = await this._apiClient.get<QlikCloudExtension>(`/extensions/${extensionId}`);
+      return response;
+    } catch (error) {
+      this._logger.error('Failed to get extension', { extensionId, error });
+      throw error;
+    }
+  }
 }
 
 /**
- * Automation client class
- * Implements resource client for automations
+ * QlikCloudThemeClient class for interacting with Qlik Cloud theme APIs
+ * 
+ * This class provides methods for working with themes in Qlik Cloud,
+ * which can be used to customize the appearance of model visualizations.
  */
-export class AutomationClient extends BaseResourceClient<Automation> {
+export class QlikCloudThemeClient {
+  private _apiClient: QlikCloudAPIClient;
+  private _logger: LogManager;
+
   /**
-   * Constructor
-   * @param apiClient API client
-   * @param authType Authentication type to use
+   * Creates a new QlikCloudThemeClient instance
+   * 
+   * @param apiClient - Qlik Cloud API client
+   * @param logger - Logger
    */
-  constructor(apiClient: any, authType: string) {
-    super(apiClient, '/v1/automations', authType);
+  constructor(
+    apiClient: QlikCloudAPIClient,
+    logger: LogManager
+  ) {
+    this._apiClient = apiClient;
+    this._logger = logger;
   }
-  
+
   /**
-   * Trigger an automation
-   * @param id Automation ID
-   * @returns Promise resolving when automation is triggered
+   * Get all themes
+   * 
+   * @returns Promise that resolves with an array of themes
    */
-  async trigger(id: string): Promise<void> {
-    await this.apiClient.request({
-      method: 'POST',
-      path: `${this.basePath}/${id}/trigger`
-    }, this.authType);
+  async getThemes(): Promise<any[]> {
+    try {
+      const response = await this._apiClient.get<{ data: any[] }>('/themes');
+      return response.data || [];
+    } catch (error) {
+      this._logger.error('Failed to get themes', { error });
+      throw error;
+    }
   }
-  
+
   /**
-   * Get automation executions
-   * @param id Automation ID
-   * @param params Query parameters
-   * @returns Promise resolving to automation executions
+   * Get a theme by ID
+   * 
+   * @param themeId - ID of the theme to get
+   * @returns Promise that resolves with the theme
    */
-  async getExecutions(id: string, params?: Record<string, string>): Promise<any[]> {
-    const response = await this.apiClient.request({
-      method: 'GET',
-      path: `${this.basePath}/${id}/executions`,
-      query: params
-    }, this.authType);
-    
-    return response.body.data || [];
+  async getTheme(themeId: string): Promise<any> {
+    try {
+      const response = await this._apiClient.get<any>(`/themes/${themeId}`);
+      return response;
+    } catch (error) {
+      this._logger.error('Failed to get theme', { themeId, error });
+      throw error;
+    }
   }
 }
+
+/**
+ * Extended factory function to create all Qlik Cloud API clients
+ * 
+ * @param config - Configuration for the API client
+ * @param authManager - Authentication manager
+ * @param logger - Logger
+ * @returns Object containing all API clients
+ */
+export function createAllQlikCloudAPIClients(
+  config: QlikCloudAPIClientConfig,
+  authManager: AuthManager,
+  logger: LogManager
+) {
+  // Create base API client
+  const apiClient = new QlikCloudAPIClient(config, authManager, logger);
+  
+  // Create specialized clients
+  const appClient = new QlikCloudAppClient(apiClient, logger);
+  const spaceClient = new QlikCloudSpaceClient(apiClient, logger);
+  const dataConnectionClient = new QlikCloudDataConnectionClient(apiClient, logger);
+  const extensionClient = new QlikCloudExtensionClient(apiClient, logger);
+  const themeClient = new QlikCloudThemeClient(apiClient, logger);
+  
+  return {
+    apiClient,
+    appClient,
+    spaceClient,
+    dataConnectionClient,
+    extensionClient,
+    themeClient
+  };
+}
+
+// Re-export types and clients from the previous file
+export * from './qlik-cloud-clients';

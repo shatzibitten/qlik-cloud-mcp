@@ -1,164 +1,158 @@
+import { AuthProvider } from './types';
 import jwt from 'jsonwebtoken';
-import { AuthProvider, AuthToken, JWTCredentials, AuthenticationError, TokenRefreshError, TokenRevocationError } from './types';
 
 /**
- * JWT configuration interface
+ * Interface for JWT provider configuration
  */
-export interface JWTConfig {
-  /**
-   * The signing key
-   */
+export interface JWTProviderConfig {
   key: string;
-  
-  /**
-   * The signing algorithm
-   */
-  algorithm: string;
-  
-  /**
-   * The token issuer
-   */
   issuer: string;
-  
-  /**
-   * Token expiration time in seconds (default: 1 hour)
-   */
-  expiresIn?: number;
+  subject?: string;
+  audience?: string;
+  expiresIn?: string | number;
+  keyId?: string;
+  algorithm?: string;
+  claims?: Record<string, any>;
 }
 
 /**
- * JWT provider class
- * Implements the AuthProvider interface for JWT authentication
+ * JWTProvider class for JWT-based authentication with Qlik Cloud
+ * 
+ * This class implements the AuthProvider interface for JWT authentication,
+ * which is commonly used for legacy embedding scenarios in Qlik Cloud.
  */
 export class JWTProvider implements AuthProvider {
-  private key: string;
-  private algorithm: string;
-  private issuer: string;
-  private expiresIn: number;
-  
+  private _config: JWTProviderConfig;
+  private _token: string | null = null;
+  private _expiresAt: number = 0;
+  private _refreshThreshold: number = 60 * 1000; // 1 minute before expiry
+
   /**
-   * Constructor
-   * @param config JWT configuration
+   * Creates a new JWTProvider instance
+   * 
+   * @param config - Configuration for the JWT provider
    */
-  constructor(config: JWTConfig) {
-    this.key = config.key;
-    this.algorithm = config.algorithm;
-    this.issuer = config.issuer;
-    this.expiresIn = config.expiresIn || 3600; // Default to 1 hour
+  constructor(config: JWTProviderConfig) {
+    this._config = config;
   }
-  
+
   /**
-   * Authenticate with Qlik Cloud using JWT
-   * @param credentials JWT credentials
-   * @returns Promise resolving to an AuthToken
+   * Get the authentication type
    */
-  async authenticate(credentials: JWTCredentials): Promise<AuthToken> {
+  get type(): string {
+    return 'jwt';
+  }
+
+  /**
+   * Get the current token
+   */
+  get token(): string | null {
+    return this._token;
+  }
+
+  /**
+   * Check if the token is valid
+   */
+  get isValid(): boolean {
+    return !!this._token && Date.now() < this._expiresAt - this._refreshThreshold;
+  }
+
+  /**
+   * Get the time when the token expires
+   */
+  get expiresAt(): number {
+    return this._expiresAt;
+  }
+
+  /**
+   * Get authentication headers
+   * 
+   * @returns Promise that resolves with the authentication headers
+   */
+  async getAuthHeaders(): Promise<Record<string, string>> {
+    // Ensure we have a valid token
+    await this.ensureValidToken();
+    
+    // Return the headers
+    return {
+      'Authorization': `Bearer ${this._token}`
+    };
+  }
+
+  /**
+   * Authenticate with the provider
+   * 
+   * @returns Promise that resolves with the token
+   */
+  async authenticate(): Promise<string> {
     try {
-      // Prepare JWT payload
+      // Prepare the payload
       const now = Math.floor(Date.now() / 1000);
-      const payload = {
-        sub: credentials.subject,
-        iss: this.issuer,
+      const expiresIn = typeof this._config.expiresIn === 'number' 
+        ? this._config.expiresIn 
+        : this._config.expiresIn 
+          ? parseInt(this._config.expiresIn, 10) 
+          : 3600; // Default to 1 hour
+      
+      const payload: Record<string, any> = {
+        iss: this._config.issuer,
         iat: now,
-        exp: now + this.expiresIn,
-        ...credentials.claims,
+        exp: now + expiresIn,
+        ...this._config.claims
       };
       
-      // Sign JWT
-      const accessToken = jwt.sign(payload, this.key, { algorithm: this.algorithm as jwt.Algorithm });
+      if (this._config.subject) {
+        payload.sub = this._config.subject;
+      }
       
-      return {
-        accessToken,
-        expiresAt: (payload.exp * 1000),
-        tokenType: 'Bearer',
-      };
-    } catch (error: any) {
-      throw new AuthenticationError(`JWT authentication failed: ${error.message}`, {
-        code: 'JWT_AUTH_FAILED',
-        cause: error,
-      });
-    }
-  }
-  
-  /**
-   * Refresh a JWT token
-   * @param token The token to refresh
-   * @returns Promise resolving to a new AuthToken
-   */
-  async refreshToken(token: AuthToken): Promise<AuthToken> {
-    try {
-      // Decode the current token to get the subject and claims
-      const decoded = jwt.verify(token.accessToken, this.key, { algorithms: [this.algorithm as jwt.Algorithm] }) as jwt.JwtPayload;
+      if (this._config.audience) {
+        payload.aud = this._config.audience;
+      }
       
-      // Create new token with the same subject and claims
-      const credentials: JWTCredentials = {
-        subject: decoded.sub as string,
-        claims: { ...decoded },
+      // Prepare the options
+      const options: jwt.SignOptions = {
+        algorithm: (this._config.algorithm || 'HS256') as jwt.Algorithm
       };
       
-      // Remove standard JWT claims that will be added by authenticate
-      delete credentials.claims.sub;
-      delete credentials.claims.iss;
-      delete credentials.claims.iat;
-      delete credentials.claims.exp;
+      if (this._config.keyId) {
+        options.keyid = this._config.keyId;
+      }
       
-      // Generate new token
-      return this.authenticate(credentials);
-    } catch (error: any) {
-      throw new TokenRefreshError(`JWT token refresh failed: ${error.message}`, {
-        code: 'JWT_REFRESH_FAILED',
-        cause: error,
-      });
-    }
-  }
-  
-  /**
-   * Revoke a JWT token
-   * @param token The token to revoke
-   * @returns Promise resolving when token is revoked
-   */
-  async revokeToken(token: AuthToken): Promise<void> {
-    try {
-      // JWTs cannot be revoked unless using a blacklist/revocation list
-      // This is a placeholder implementation
-      console.log(`JWT token revocation not implemented (stateless tokens cannot be revoked)`);
+      // Sign the token
+      this._token = jwt.sign(payload, this._config.key, options);
+      this._expiresAt = (payload.exp * 1000);
       
-      // In a real implementation with a revocation list, you might do:
-      /*
-      await axios.post(this.revocationUrl, {
-        token: token.accessToken,
-      }, {
-        headers: {
-          'Authorization': `Bearer ${adminToken}`,
-        },
-      });
-      */
-    } catch (error: any) {
-      throw new TokenRevocationError(`JWT token revocation failed: ${error.message}`, {
-        code: 'JWT_REVOCATION_FAILED',
-        cause: error,
-      });
-    }
-  }
-  
-  /**
-   * Check if a JWT token is valid
-   * @param token The token to check
-   * @returns Boolean indicating if token is valid
-   */
-  isTokenValid(token: AuthToken): boolean {
-    try {
-      // Verify token signature and expiration
-      jwt.verify(token.accessToken, this.key, { algorithms: [this.algorithm as jwt.Algorithm] });
-      
-      // Check if token is expired based on our stored expiresAt
-      const now = Date.now();
-      
-      // Add a buffer of 60 seconds to account for network latency
-      return token.expiresAt > now + 60000;
+      return this._token;
     } catch (error) {
-      // Token is invalid or expired
-      return false;
+      // Clear any existing token
+      this._token = null;
+      this._expiresAt = 0;
+      
+      // Re-throw the error
+      throw error;
     }
+  }
+
+  /**
+   * Ensure we have a valid token
+   * 
+   * @returns Promise that resolves with the token
+   */
+  async ensureValidToken(): Promise<string> {
+    if (!this.isValid) {
+      return this.authenticate();
+    }
+    
+    return this._token!;
+  }
+
+  /**
+   * Invalidate the current token
+   * 
+   * @returns Promise that resolves when the token is invalidated
+   */
+  async invalidateToken(): Promise<void> {
+    this._token = null;
+    this._expiresAt = 0;
   }
 }

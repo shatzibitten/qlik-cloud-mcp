@@ -1,240 +1,151 @@
+import { AuthProvider } from './types';
 import axios from 'axios';
-import { AuthProvider, AuthToken, OAuth2Credentials, AuthenticationError, TokenRefreshError, TokenRevocationError } from './types';
 
 /**
- * OAuth2 configuration interface
+ * Interface for OAuth2 provider configuration
  */
-export interface OAuth2Config {
-  /**
-   * The client ID
-   */
-  clientId: string;
-  
-  /**
-   * The client secret
-   */
-  clientSecret: string;
-  
-  /**
-   * The token URL
-   */
+export interface OAuth2ProviderConfig {
   tokenUrl: string;
+  clientId: string;
+  clientSecret: string;
+  scope?: string;
+  audience?: string;
 }
 
 /**
- * OAuth2 provider class
- * Implements the AuthProvider interface for OAuth2 authentication
+ * OAuth2Provider class for machine-to-machine authentication with Qlik Cloud
+ * 
+ * This class implements the AuthProvider interface for OAuth2 authentication,
+ * specifically designed for machine-to-machine scenarios with Qlik Cloud.
  */
 export class OAuth2Provider implements AuthProvider {
-  private clientId: string;
-  private clientSecret: string;
-  private tokenUrl: string;
-  
+  private _config: OAuth2ProviderConfig;
+  private _token: string | null = null;
+  private _expiresAt: number = 0;
+  private _refreshThreshold: number = 60 * 1000; // 1 minute before expiry
+
   /**
-   * Constructor
-   * @param config OAuth2 configuration
+   * Creates a new OAuth2Provider instance
+   * 
+   * @param config - Configuration for the OAuth2 provider
    */
-  constructor(config: OAuth2Config) {
-    this.clientId = config.clientId;
-    this.clientSecret = config.clientSecret;
-    this.tokenUrl = config.tokenUrl;
+  constructor(config: OAuth2ProviderConfig) {
+    this._config = config;
   }
-  
+
   /**
-   * Authenticate with Qlik Cloud using OAuth2
-   * @param credentials OAuth2 credentials
-   * @returns Promise resolving to an AuthToken
+   * Get the authentication type
    */
-  async authenticate(credentials: OAuth2Credentials): Promise<AuthToken> {
+  get type(): string {
+    return 'oauth2';
+  }
+
+  /**
+   * Get the current token
+   */
+  get token(): string | null {
+    return this._token;
+  }
+
+  /**
+   * Check if the token is valid
+   */
+  get isValid(): boolean {
+    return !!this._token && Date.now() < this._expiresAt - this._refreshThreshold;
+  }
+
+  /**
+   * Get the time when the token expires
+   */
+  get expiresAt(): number {
+    return this._expiresAt;
+  }
+
+  /**
+   * Get authentication headers
+   * 
+   * @returns Promise that resolves with the authentication headers
+   */
+  async getAuthHeaders(): Promise<Record<string, string>> {
+    // Ensure we have a valid token
+    await this.ensureValidToken();
+    
+    // Return the headers
+    return {
+      'Authorization': `Bearer ${this._token}`
+    };
+  }
+
+  /**
+   * Authenticate with the provider
+   * 
+   * @returns Promise that resolves with the token
+   */
+  async authenticate(): Promise<string> {
     try {
-      // Prepare request data based on grant type
-      const data: Record<string, string> = {
-        grant_type: credentials.grantType,
-        client_id: this.clientId,
-        client_secret: this.clientSecret,
-      };
+      // Prepare the request data
+      const data = new URLSearchParams();
+      data.append('grant_type', 'client_credentials');
+      data.append('client_id', this._config.clientId);
+      data.append('client_secret', this._config.clientSecret);
       
-      // Add additional parameters based on grant type
-      if (credentials.grantType === 'password') {
-        if (!credentials.username || !credentials.password) {
-          throw new AuthenticationError('Username and password are required for password grant');
+      if (this._config.scope) {
+        data.append('scope', this._config.scope);
+      }
+      
+      if (this._config.audience) {
+        data.append('audience', this._config.audience);
+      }
+      
+      // Make the request
+      const response = await axios.post(this._config.tokenUrl, data, {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
         }
-        data.username = credentials.username;
-        data.password = credentials.password;
-      }
-      
-      if (credentials.scope) {
-        data.scope = credentials.scope;
-      }
-      
-      // Make request to token endpoint
-      const response = await axios.post(this.tokenUrl, new URLSearchParams(data), {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
       });
       
-      // Parse response
-      const now = Date.now();
-      const expiresIn = response.data.expires_in || 3600; // Default to 1 hour if not provided
+      // Extract the token and expiry
+      const { access_token, expires_in } = response.data;
       
-      return {
-        accessToken: response.data.access_token,
-        refreshToken: response.data.refresh_token,
-        expiresAt: now + expiresIn * 1000,
-        tokenType: response.data.token_type || 'Bearer',
-        scope: response.data.scope,
-      };
-    } catch (error: any) {
-      // Handle axios errors
-      if (error.response) {
-        throw new AuthenticationError(`OAuth2 authentication failed: ${error.response.data.error_description || error.response.data.error || error.message}`, {
-          code: 'OAUTH2_AUTH_FAILED',
-          details: {
-            status: error.response.status,
-            data: error.response.data,
-          },
-          cause: error,
-        });
+      if (!access_token) {
+        throw new Error('No access token returned');
       }
       
-      // Handle network errors
-      throw new AuthenticationError(`OAuth2 authentication failed: ${error.message}`, {
-        code: 'OAUTH2_AUTH_FAILED',
-        cause: error,
-      });
+      // Store the token and calculate expiry
+      this._token = access_token;
+      this._expiresAt = Date.now() + (expires_in * 1000);
+      
+      return this._token;
+    } catch (error) {
+      // Clear any existing token
+      this._token = null;
+      this._expiresAt = 0;
+      
+      // Re-throw the error
+      throw error;
     }
   }
-  
+
   /**
-   * Refresh an OAuth2 token
-   * @param token The token to refresh
-   * @returns Promise resolving to a new AuthToken
+   * Ensure we have a valid token
+   * 
+   * @returns Promise that resolves with the token
    */
-  async refreshToken(token: AuthToken): Promise<AuthToken> {
-    if (!token.refreshToken) {
-      throw new TokenRefreshError('No refresh token available');
+  async ensureValidToken(): Promise<string> {
+    if (!this.isValid) {
+      return this.authenticate();
     }
     
-    try {
-      // Prepare request data
-      const data = {
-        grant_type: 'refresh_token',
-        refresh_token: token.refreshToken,
-        client_id: this.clientId,
-        client_secret: this.clientSecret,
-      };
-      
-      // Make request to token endpoint
-      const response = await axios.post(this.tokenUrl, new URLSearchParams(data), {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-      });
-      
-      // Parse response
-      const now = Date.now();
-      const expiresIn = response.data.expires_in || 3600; // Default to 1 hour if not provided
-      
-      return {
-        accessToken: response.data.access_token,
-        refreshToken: response.data.refresh_token || token.refreshToken,
-        expiresAt: now + expiresIn * 1000,
-        tokenType: response.data.token_type || 'Bearer',
-        scope: response.data.scope || token.scope,
-      };
-    } catch (error: any) {
-      // Handle axios errors
-      if (error.response) {
-        throw new TokenRefreshError(`OAuth2 token refresh failed: ${error.response.data.error_description || error.response.data.error || error.message}`, {
-          code: 'OAUTH2_REFRESH_FAILED',
-          details: {
-            status: error.response.status,
-            data: error.response.data,
-          },
-          cause: error,
-        });
-      }
-      
-      // Handle network errors
-      throw new TokenRefreshError(`OAuth2 token refresh failed: ${error.message}`, {
-        code: 'OAUTH2_REFRESH_FAILED',
-        cause: error,
-      });
-    }
+    return this._token!;
   }
-  
+
   /**
-   * Revoke an OAuth2 token
-   * @param token The token to revoke
-   * @returns Promise resolving when token is revoked
+   * Invalidate the current token
+   * 
+   * @returns Promise that resolves when the token is invalidated
    */
-  async revokeToken(token: AuthToken): Promise<void> {
-    try {
-      // Note: Qlik Cloud doesn't have a standard token revocation endpoint
-      // This is a placeholder implementation
-      // In a real implementation, you would call the token revocation endpoint if available
-      
-      // For now, we'll just log that the token was "revoked"
-      console.log(`Token revocation not implemented for Qlik Cloud OAuth2`);
-      
-      // In a real implementation, you might do something like:
-      /*
-      await axios.post(this.revocationUrl, new URLSearchParams({
-        token: token.accessToken,
-        token_type_hint: 'access_token',
-        client_id: this.clientId,
-        client_secret: this.clientSecret,
-      }), {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-      });
-      
-      if (token.refreshToken) {
-        await axios.post(this.revocationUrl, new URLSearchParams({
-          token: token.refreshToken,
-          token_type_hint: 'refresh_token',
-          client_id: this.clientId,
-          client_secret: this.clientSecret,
-        }), {
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-        });
-      }
-      */
-    } catch (error: any) {
-      // Handle axios errors
-      if (error.response) {
-        throw new TokenRevocationError(`OAuth2 token revocation failed: ${error.response.data.error_description || error.response.data.error || error.message}`, {
-          code: 'OAUTH2_REVOCATION_FAILED',
-          details: {
-            status: error.response.status,
-            data: error.response.data,
-          },
-          cause: error,
-        });
-      }
-      
-      // Handle network errors
-      throw new TokenRevocationError(`OAuth2 token revocation failed: ${error.message}`, {
-        code: 'OAUTH2_REVOCATION_FAILED',
-        cause: error,
-      });
-    }
-  }
-  
-  /**
-   * Check if an OAuth2 token is valid
-   * @param token The token to check
-   * @returns Boolean indicating if token is valid
-   */
-  isTokenValid(token: AuthToken): boolean {
-    // Check if token is expired
-    const now = Date.now();
-    
-    // Add a buffer of 60 seconds to account for network latency
-    return token.expiresAt > now + 60000;
+  async invalidateToken(): Promise<void> {
+    this._token = null;
+    this._expiresAt = 0;
   }
 }

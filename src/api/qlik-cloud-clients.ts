@@ -1,271 +1,336 @@
-import { BaseResourceClient } from './resource-client';
+import { QlikCloudAPIClient, QlikCloudAPIClientConfig } from './qlik-cloud-api-client';
+import { AuthManager } from '../auth/auth-manager';
+import { LogManager } from '../utils/log-manager';
 
 /**
- * User interface
+ * Interface for Qlik Cloud app
  */
-export interface User {
-  id: string;
-  name: string;
-  email: string;
-  status: 'active' | 'inactive' | 'pending';
-  created: string;
-  lastUpdated: string;
-  roles: string[];
-}
-
-/**
- * User client class
- * Implements resource client for users
- */
-export class UserClient extends BaseResourceClient<User> {
-  /**
-   * Constructor
-   * @param apiClient API client
-   * @param authType Authentication type to use
-   */
-  constructor(apiClient: any, authType: string) {
-    super(apiClient, '/v1/users', authType);
-  }
-  
-  /**
-   * Get current user
-   * @returns Promise resolving to the current user
-   */
-  async getCurrentUser(): Promise<User> {
-    const response = await this.apiClient.request({
-      method: 'GET',
-      path: `${this.basePath}/me`
-    }, this.authType);
-    
-    return response.body;
-  }
-  
-  /**
-   * Invite a user
-   * @param email User email
-   * @param name User name
-   * @param roles User roles
-   * @returns Promise resolving to the invited user
-   */
-  async inviteUser(email: string, name: string, roles: string[]): Promise<User> {
-    const response = await this.apiClient.request({
-      method: 'POST',
-      path: `${this.basePath}/invite`,
-      body: {
-        email,
-        name,
-        roles
-      }
-    }, this.authType);
-    
-    return response.body;
-  }
-}
-
-/**
- * Space interface
- */
-export interface Space {
+export interface QlikCloudApp {
   id: string;
   name: string;
   description?: string;
-  type: 'shared' | 'personal' | 'managed';
-  ownerId: string;
-  created: string;
-  modified: string;
+  thumbnail?: string;
+  lastReloadTime?: string;
+  createdDate: string;
+  modifiedDate: string;
+  owner: {
+    id: string;
+    name: string;
+  };
+  spaceId?: string;
 }
 
 /**
- * Space client class
- * Implements resource client for spaces
+ * Interface for Qlik Cloud space
  */
-export class SpaceClient extends BaseResourceClient<Space> {
-  /**
-   * Constructor
-   * @param apiClient API client
-   * @param authType Authentication type to use
-   */
-  constructor(apiClient: any, authType: string) {
-    super(apiClient, '/v1/spaces', authType);
-  }
-  
-  /**
-   * Get space members
-   * @param id Space ID
-   * @returns Promise resolving to space members
-   */
-  async getMembers(id: string): Promise<any[]> {
-    const response = await this.apiClient.request({
-      method: 'GET',
-      path: `${this.basePath}/${id}/members`
-    }, this.authType);
-    
-    return response.body.data || [];
-  }
-  
-  /**
-   * Add member to space
-   * @param id Space ID
-   * @param userId User ID
-   * @param roles Roles
-   * @returns Promise resolving when member is added
-   */
-  async addMember(id: string, userId: string, roles: string[]): Promise<void> {
-    await this.apiClient.request({
-      method: 'POST',
-      path: `${this.basePath}/${id}/members`,
-      body: {
-        userId,
-        roles
-      }
-    }, this.authType);
-  }
-  
-  /**
-   * Remove member from space
-   * @param id Space ID
-   * @param userId User ID
-   * @returns Promise resolving when member is removed
-   */
-  async removeMember(id: string, userId: string): Promise<void> {
-    await this.apiClient.request({
-      method: 'DELETE',
-      path: `${this.basePath}/${id}/members/${userId}`
-    }, this.authType);
-  }
-}
-
-/**
- * Data connection interface
- */
-export interface DataConnection {
+export interface QlikCloudSpace {
   id: string;
   name: string;
+  description?: string;
   type: string;
-  connectionString: string;
-  qConnectStatement: string;
-  created: string;
-  lastUpdated: string;
-  ownerId: string;
+  createdDate: string;
+  modifiedDate: string;
+  owner: {
+    id: string;
+    name: string;
+  };
 }
 
 /**
- * Data connection client class
- * Implements resource client for data connections
+ * QlikCloudAppClient class for interacting with Qlik Cloud app APIs
+ * 
+ * This class provides methods for working with Qlik Sense apps in Qlik Cloud,
+ * including listing, retrieving, and managing apps.
  */
-export class DataConnectionClient extends BaseResourceClient<DataConnection> {
+export class QlikCloudAppClient {
+  private _apiClient: QlikCloudAPIClient;
+  private _logger: LogManager;
+
   /**
-   * Constructor
-   * @param apiClient API client
-   * @param authType Authentication type to use
+   * Creates a new QlikCloudAppClient instance
+   * 
+   * @param apiClient - Qlik Cloud API client
+   * @param logger - Logger
    */
-  constructor(apiClient: any, authType: string) {
-    super(apiClient, '/v1/data-connections', authType);
+  constructor(
+    apiClient: QlikCloudAPIClient,
+    logger: LogManager
+  ) {
+    this._apiClient = apiClient;
+    this._logger = logger;
   }
+
+  /**
+   * Get all apps
+   * 
+   * @returns Promise that resolves with an array of apps
+   */
+  async getApps(): Promise<QlikCloudApp[]> {
+    try {
+      const response = await this._apiClient.get<{ data: QlikCloudApp[] }>('/items?resourceType=app');
+      return response.data || [];
+    } catch (error) {
+      this._logger.error('Failed to get apps', { error });
+      throw error;
+    }
+  }
+
+  /**
+   * Get an app by ID
+   * 
+   * @param appId - ID of the app to get
+   * @returns Promise that resolves with the app
+   */
+  async getApp(appId: string): Promise<QlikCloudApp> {
+    try {
+      const response = await this._apiClient.get<QlikCloudApp>(`/apps/${appId}`);
+      return response;
+    } catch (error) {
+      this._logger.error('Failed to get app', { appId, error });
+      throw error;
+    }
+  }
+
+  /**
+   * Get app metadata
+   * 
+   * @param appId - ID of the app to get metadata for
+   * @returns Promise that resolves with the app metadata
+   */
+  async getAppMetadata(appId: string): Promise<any> {
+    try {
+      const response = await this._apiClient.get<any>(`/apps/${appId}/metadata`);
+      return response;
+    } catch (error) {
+      this._logger.error('Failed to get app metadata', { appId, error });
+      throw error;
+    }
+  }
+
+  /**
+   * Get app script
+   * 
+   * @param appId - ID of the app to get script for
+   * @returns Promise that resolves with the app script
+   */
+  async getAppScript(appId: string): Promise<string> {
+    try {
+      const response = await this._apiClient.get<{ script: string }>(`/apps/${appId}/script`);
+      return response.script;
+    } catch (error) {
+      this._logger.error('Failed to get app script', { appId, error });
+      throw error;
+    }
+  }
+
+  /**
+   * Get app variables
+   * 
+   * @param appId - ID of the app to get variables for
+   * @returns Promise that resolves with the app variables
+   */
+  async getAppVariables(appId: string): Promise<any[]> {
+    try {
+      const response = await this._apiClient.get<{ data: any[] }>(`/apps/${appId}/variables`);
+      return response.data || [];
+    } catch (error) {
+      this._logger.error('Failed to get app variables', { appId, error });
+      throw error;
+    }
+  }
+
+  /**
+   * Get app dimensions
+   * 
+   * @param appId - ID of the app to get dimensions for
+   * @returns Promise that resolves with the app dimensions
+   */
+  async getAppDimensions(appId: string): Promise<any[]> {
+    try {
+      const response = await this._apiClient.get<{ data: any[] }>(`/apps/${appId}/dimensions`);
+      return response.data || [];
+    } catch (error) {
+      this._logger.error('Failed to get app dimensions', { appId, error });
+      throw error;
+    }
+  }
+
+  /**
+   * Get app measures
+   * 
+   * @param appId - ID of the app to get measures for
+   * @returns Promise that resolves with the app measures
+   */
+  async getAppMeasures(appId: string): Promise<any[]> {
+    try {
+      const response = await this._apiClient.get<{ data: any[] }>(`/apps/${appId}/measures`);
+      return response.data || [];
+    } catch (error) {
+      this._logger.error('Failed to get app measures', { appId, error });
+      throw error;
+    }
+  }
+
+  /**
+   * Get app sheets
+   * 
+   * @param appId - ID of the app to get sheets for
+   * @returns Promise that resolves with the app sheets
+   */
+  async getAppSheets(appId: string): Promise<any[]> {
+    try {
+      const response = await this._apiClient.get<{ data: any[] }>(`/apps/${appId}/sheets`);
+      return response.data || [];
+    } catch (error) {
+      this._logger.error('Failed to get app sheets', { appId, error });
+      throw error;
+    }
+  }
+
+  /**
+   * Get app objects
+   * 
+   * @param appId - ID of the app to get objects for
+   * @returns Promise that resolves with the app objects
+   */
+  async getAppObjects(appId: string): Promise<any[]> {
+    try {
+      const response = await this._apiClient.get<{ data: any[] }>(`/apps/${appId}/objects`);
+      return response.data || [];
+    } catch (error) {
+      this._logger.error('Failed to get app objects', { appId, error });
+      throw error;
+    }
+  }
+
+  /**
+   * Get app bookmarks
+   * 
+   * @param appId - ID of the app to get bookmarks for
+   * @returns Promise that resolves with the app bookmarks
+   */
+  async getAppBookmarks(appId: string): Promise<any[]> {
+    try {
+      const response = await this._apiClient.get<{ data: any[] }>(`/apps/${appId}/bookmarks`);
+      return response.data || [];
+    } catch (error) {
+      this._logger.error('Failed to get app bookmarks', { appId, error });
+      throw error;
+    }
+  }
+
+  /**
+   * Reload an app
+   * 
+   * @param appId - ID of the app to reload
+   * @returns Promise that resolves when the app is reloaded
+   */
+  async reloadApp(appId: string): Promise<any> {
+    try {
+      const response = await this._apiClient.post<any>(`/apps/${appId}/reload`);
+      return response;
+    } catch (error) {
+      this._logger.error('Failed to reload app', { appId, error });
+      throw error;
+    }
+  }
+}
+
+/**
+ * QlikCloudSpaceClient class for interacting with Qlik Cloud space APIs
+ * 
+ * This class provides methods for working with spaces in Qlik Cloud,
+ * including listing, retrieving, and managing spaces.
+ */
+export class QlikCloudSpaceClient {
+  private _apiClient: QlikCloudAPIClient;
+  private _logger: LogManager;
+
+  /**
+   * Creates a new QlikCloudSpaceClient instance
+   * 
+   * @param apiClient - Qlik Cloud API client
+   * @param logger - Logger
+   */
+  constructor(
+    apiClient: QlikCloudAPIClient,
+    logger: LogManager
+  ) {
+    this._apiClient = apiClient;
+    this._logger = logger;
+  }
+
+  /**
+   * Get all spaces
+   * 
+   * @returns Promise that resolves with an array of spaces
+   */
+  async getSpaces(): Promise<QlikCloudSpace[]> {
+    try {
+      const response = await this._apiClient.get<{ data: QlikCloudSpace[] }>('/spaces');
+      return response.data || [];
+    } catch (error) {
+      this._logger.error('Failed to get spaces', { error });
+      throw error;
+    }
+  }
+
+  /**
+   * Get a space by ID
+   * 
+   * @param spaceId - ID of the space to get
+   * @returns Promise that resolves with the space
+   */
+  async getSpace(spaceId: string): Promise<QlikCloudSpace> {
+    try {
+      const response = await this._apiClient.get<QlikCloudSpace>(`/spaces/${spaceId}`);
+      return response;
+    } catch (error) {
+      this._logger.error('Failed to get space', { spaceId, error });
+      throw error;
+    }
+  }
+
+  /**
+   * Get apps in a space
+   * 
+   * @param spaceId - ID of the space to get apps for
+   * @returns Promise that resolves with an array of apps
+   */
+  async getSpaceApps(spaceId: string): Promise<QlikCloudApp[]> {
+    try {
+      const response = await this._apiClient.get<{ data: QlikCloudApp[] }>(`/spaces/${spaceId}/apps`);
+      return response.data || [];
+    } catch (error) {
+      this._logger.error('Failed to get space apps', { spaceId, error });
+      throw error;
+    }
+  }
+}
+
+/**
+ * Factory function to create Qlik Cloud API clients
+ * 
+ * @param config - Configuration for the API client
+ * @param authManager - Authentication manager
+ * @param logger - Logger
+ * @returns Object containing API clients
+ */
+export function createQlikCloudAPIClients(
+  config: QlikCloudAPIClientConfig,
+  authManager: AuthManager,
+  logger: LogManager
+) {
+  // Create base API client
+  const apiClient = new QlikCloudAPIClient(config, authManager, logger);
   
-  /**
-   * Test a data connection
-   * @param id Data connection ID
-   * @returns Promise resolving to test result
-   */
-  async testConnection(id: string): Promise<any> {
-    const response = await this.apiClient.request({
-      method: 'POST',
-      path: `${this.basePath}/${id}/test`
-    }, this.authType);
-    
-    return response.body;
-  }
-}
-
-/**
- * Extension interface
- */
-export interface Extension {
-  id: string;
-  name: string;
-  version: string;
-  description?: string;
-  author?: string;
-  created: string;
-  modified: string;
-}
-
-/**
- * Extension client class
- * Implements resource client for extensions
- */
-export class ExtensionClient extends BaseResourceClient<Extension> {
-  /**
-   * Constructor
-   * @param apiClient API client
-   * @param authType Authentication type to use
-   */
-  constructor(apiClient: any, authType: string) {
-    super(apiClient, '/v1/extensions', authType);
-  }
+  // Create specialized clients
+  const appClient = new QlikCloudAppClient(apiClient, logger);
+  const spaceClient = new QlikCloudSpaceClient(apiClient, logger);
   
-  /**
-   * Upload an extension
-   * @param file Extension file (base64 encoded)
-   * @param overwrite Whether to overwrite existing extension
-   * @returns Promise resolving to the uploaded extension
-   */
-  async uploadExtension(file: string, overwrite: boolean = false): Promise<Extension> {
-    const response = await this.apiClient.request({
-      method: 'POST',
-      path: this.basePath,
-      query: {
-        overwrite: overwrite.toString()
-      },
-      body: {
-        file
-      }
-    }, this.authType);
-    
-    return response.body;
-  }
-}
-
-/**
- * Theme interface
- */
-export interface Theme {
-  id: string;
-  name: string;
-  description?: string;
-  created: string;
-  modified: string;
-  ownerId: string;
-}
-
-/**
- * Theme client class
- * Implements resource client for themes
- */
-export class ThemeClient extends BaseResourceClient<Theme> {
-  /**
-   * Constructor
-   * @param apiClient API client
-   * @param authType Authentication type to use
-   */
-  constructor(apiClient: any, authType: string) {
-    super(apiClient, '/v1/themes', authType);
-  }
-  
-  /**
-   * Apply a theme to an app
-   * @param id Theme ID
-   * @param appId App ID
-   * @returns Promise resolving when theme is applied
-   */
-  async applyToApp(id: string, appId: string): Promise<void> {
-    await this.apiClient.request({
-      method: 'POST',
-      path: `${this.basePath}/${id}/apply`,
-      body: {
-        appId
-      }
-    }, this.authType);
-  }
+  return {
+    apiClient,
+    appClient,
+    spaceClient
+  };
 }

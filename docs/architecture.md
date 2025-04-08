@@ -1,255 +1,185 @@
-# Qlik Cloud MCP Architecture
+# Architecture
 
-## Overview
+The Qlik Cloud Model Context Protocol (MCP) server follows a modular architecture designed with SOLID and KISS principles. This document outlines the core components and their interactions.
 
-The Qlik Cloud MCP (Message Control Protocol) server provides a standardized interface for interacting with Qlik Cloud APIs. This document outlines the architecture of the server, including its components, interfaces, and data flow.
+## System Architecture
+
+The MCP server is structured around several key modules that work together to provide a comprehensive model context management solution:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Qlik Cloud MCP Server                        │
+│                                                                 │
+│  ┌───────────────┐    ┌───────────────┐    ┌───────────────┐   │
+│  │  HTTP Server  │    │  WebSocket    │    │  API Router   │   │
+│  │               │◄───┤  Handler      │◄───┤               │   │
+│  └───────┬───────┘    └───────┬───────┘    └───────┬───────┘   │
+│          │                    │                    │           │
+│          │                    │                    │           │
+│  ┌───────▼───────────────────▼───────────────────▼───────┐    │
+│  │                                                        │    │
+│  │                 Model Context Manager                  │    │
+│  │                                                        │    │
+│  └───────┬───────────────────┬───────────────────┬───────┘    │
+│          │                   │                   │            │
+│  ┌───────▼───────┐   ┌───────▼───────┐   ┌───────▼───────┐    │
+│  │ Model Context │   │ Object        │   │ Model State   │    │
+│  │               │   │ Registry      │   │ Management    │    │
+│  └───────┬───────┘   └───────────────┘   └───────────────┘    │
+│          │                                                     │
+│  ┌───────▼───────┐                                             │
+│  │ QIX Session   │                                             │
+│  │ Management    │                                             │
+│  └───────┬───────┘                                             │
+│          │                                                     │
+│  ┌───────▼───────┐   ┌───────────────┐   ┌───────────────┐    │
+│  │ WebSocket     │   │ Authentication│   │ Qlik Cloud    │    │
+│  │ Connection    │   │ Manager       │   │ API Client    │    │
+│  └───────────────┘   └───────┬───────┘   └───────┬───────┘    │
+│                              │                   │            │
+└──────────────────────────────┼───────────────────┼────────────┘
+                               │                   │
+                      ┌────────▼──────┐   ┌────────▼──────┐
+                      │ OAuth2/JWT/   │   │ Qlik Cloud    │
+                      │ API Key       │   │ REST APIs     │
+                      └───────────────┘   └───────────────┘
+```
 
 ## Core Components
 
-### 1. Authentication Module
+### 1. Model Context Module
 
-The authentication module handles all aspects of authenticating with Qlik Cloud APIs.
+The Model Context Module is the heart of the MCP server, responsible for managing model state, object tracking, and session handling.
 
-#### Components:
-- **AuthProvider**: Abstract interface for authentication providers
-- **OAuth2Provider**: Implements OAuth2 authentication flow
-- **JWTProvider**: Implements JWT authentication
-- **APIKeyProvider**: Implements API key authentication
-- **AuthManager**: Manages authentication providers and token lifecycle
+**Key Components:**
+- **ModelContext**: Central component for managing model state and sessions
+- **ModelState**: Handles state persistence across sessions
+- **ObjectRegistry**: Tracks objects and their handles
 
-#### Responsibilities:
-- Authenticate requests to Qlik Cloud APIs
-- Manage token lifecycle (acquisition, renewal, revocation)
-- Store and retrieve credentials securely
-- Provide authenticated clients to other modules
+**Responsibilities:**
+- Creating and managing model contexts
+- Saving and restoring model state
+- Tracking model objects and their properties
+- Managing sessions with the Qlik Associative Engine
 
-### 2. API Integration Module
+### 2. Engine Communication Module
 
-The API integration module handles communication with Qlik Cloud REST APIs.
+The Engine Communication Module handles WebSocket connections to the Qlik Associative Engine, providing a reliable communication channel for model operations.
 
-#### Components:
-- **APIClient**: Base client for making API requests
-- **ResourceClient**: Abstract interface for resource-specific clients
-- **APIKeyClient**, **AppsClient**, **AuditsClient**, etc.: Resource-specific implementations
-- **APIManager**: Factory for creating and managing API clients
+**Key Components:**
+- **WebSocketConnection**: Manages WebSocket communication with the Qlik Engine
+- **QixSession**: Provides a higher-level interface using enigma.js
 
-#### Responsibilities:
-- Make authenticated requests to Qlik Cloud APIs
-- Handle request formatting and response parsing
-- Implement retry logic and error handling
-- Provide a unified interface for all Qlik Cloud APIs
+**Responsibilities:**
+- Establishing and maintaining WebSocket connections
+- Handling JSON-RPC protocol communication
+- Managing session lifecycle
+- Executing methods on engine objects
 
-### 3. Webhook Event Handling Module
+### 3. Authentication Module
 
-The webhook event handling module processes events from Qlik Cloud.
+The Authentication Module provides secure access to the MCP server and Qlik Cloud resources with multiple authentication methods.
 
-#### Components:
-- **EventListener**: Listens for incoming webhook events
-- **EventProcessor**: Processes and routes events
-- **EventHandler**: Abstract interface for event handlers
-- **NotificationManager**: Manages notifications based on events
+**Key Components:**
+- **AuthManager**: Orchestrates authentication process
+- **OAuth2Provider**: Handles OAuth2 authentication
+- **JWTProvider**: Manages JWT-based authentication
+- **APIKeyProvider**: Supports API key authentication
 
-#### Responsibilities:
-- Receive and validate webhook events
-- Process events based on type and content
-- Route events to appropriate handlers
-- Send notifications based on events
+**Responsibilities:**
+- Authenticating users and clients
+- Managing authentication tokens
+- Providing secure access to Qlik Cloud resources
+- Handling token refresh and expiration
 
-### 4. Server Core
+### 4. API Integration Module
 
-The server core ties all modules together and provides the external interface.
+The API Integration Module connects the MCP server with Qlik Cloud REST APIs, enabling seamless integration with Qlik Cloud resources.
 
-#### Components:
-- **Server**: Main server application
-- **Router**: Routes incoming requests
-- **ConfigManager**: Manages server configuration
-- **LogManager**: Handles logging
+**Key Components:**
+- **QlikCloudAPIClient**: Base client for Qlik Cloud REST APIs
+- **QlikCloudAppClient**: Client for app-related operations
+- **QlikCloudSpaceClient**: Client for space-related operations
+- **QlikCloudDataConnectionClient**: Client for data connection operations
+- **QlikCloudModelContextIntegration**: Connects APIs with Model Context
 
-#### Responsibilities:
-- Initialize and configure all modules
-- Route incoming requests to appropriate handlers
-- Manage server lifecycle
-- Handle errors and logging
+**Responsibilities:**
+- Retrieving and managing Qlik Cloud resources
+- Synchronizing model context with Qlik apps
+- Handling API authentication
+- Managing API errors and retries
+
+### 5. Server Module
+
+The Server Module exposes REST and WebSocket endpoints for client interaction, providing a comprehensive API for model context operations.
+
+**Key Components:**
+- **Server**: HTTP server with middleware and routing
+- **ModelContextRouter**: REST API endpoints for model context operations
+- **WebSocketHandler**: WebSocket interface for real-time updates
+
+**Responsibilities:**
+- Exposing REST API endpoints
+- Handling WebSocket connections
+- Processing client requests
+- Returning appropriate responses
 
 ## Data Flow
 
-1. **Authentication Flow**:
-   - Client requests authentication
-   - AuthManager selects appropriate provider
-   - Provider authenticates with Qlik Cloud
-   - AuthManager stores and returns tokens
+1. **Client Authentication**:
+   - Client authenticates using OAuth2, JWT, or API key
+   - AuthManager validates credentials and provides access token
+   - Token is used for subsequent requests
 
-2. **API Request Flow**:
-   - Client makes API request
-   - Server routes request to appropriate handler
-   - Handler uses APIManager to get appropriate client
-   - Client makes authenticated request to Qlik Cloud
-   - Response is processed and returned to client
+2. **Model Context Creation**:
+   - Client requests new model context via REST API
+   - ModelContextRouter processes request
+   - ModelContextManager creates new ModelContext
+   - QixSession establishes connection to Qlik Engine
 
-3. **Webhook Event Flow**:
-   - Qlik Cloud sends webhook event
-   - EventListener receives and validates event
-   - EventProcessor determines event type
-   - EventProcessor routes event to appropriate handler
-   - Handler processes event and triggers actions
+3. **Model Operations**:
+   - Client performs operations on model via REST API or WebSocket
+   - Server routes requests to appropriate handlers
+   - ModelContext executes operations on Qlik Engine
+   - Results are returned to client
 
-## Interfaces
+4. **State Management**:
+   - Client requests to save or restore state
+   - ModelContext captures or applies state
+   - ModelState persists or retrieves state data
+   - State changes are synchronized with Qlik Cloud
 
-### External Interfaces
+5. **Qlik Cloud Integration**:
+   - QlikCloudModelContextIntegration connects with Qlik Cloud
+   - QlikCloudAPIClient communicates with REST APIs
+   - Model context is synchronized with Qlik Cloud resources
+   - Changes are reflected in model context
 
-1. **REST API**:
-   - Authentication endpoints
-   - API proxy endpoints
-   - Webhook configuration endpoints
-   - Server management endpoints
+## Design Principles
 
-2. **WebSocket API** (optional):
-   - Real-time event notifications
-   - Subscription management
+The MCP server architecture follows these key design principles:
 
-### Internal Interfaces
+1. **Modularity**: Each component has a single responsibility and can be developed, tested, and maintained independently.
 
-1. **AuthProvider Interface**:
-   ```typescript
-   interface AuthProvider {
-     authenticate(credentials: any): Promise<AuthToken>;
-     refreshToken(token: AuthToken): Promise<AuthToken>;
-     revokeToken(token: AuthToken): Promise<void>;
-     isTokenValid(token: AuthToken): boolean;
-   }
-   ```
+2. **Separation of Concerns**: Clear boundaries between components with well-defined interfaces.
 
-2. **ResourceClient Interface**:
-   ```typescript
-   interface ResourceClient {
-     getAll(params?: any): Promise<any[]>;
-     getById(id: string): Promise<any>;
-     create(data: any): Promise<any>;
-     update(id: string, data: any): Promise<any>;
-     delete(id: string): Promise<void>;
-   }
-   ```
+3. **Dependency Injection**: Components receive their dependencies rather than creating them.
 
-3. **EventHandler Interface**:
-   ```typescript
-   interface EventHandler {
-     canHandle(event: WebhookEvent): boolean;
-     handle(event: WebhookEvent): Promise<void>;
-   }
-   ```
+4. **Event-Driven Communication**: Components communicate through events to reduce coupling.
 
-## Data Models
+5. **Error Handling**: Comprehensive error handling at all levels with proper logging.
 
-### AuthToken
-```typescript
-interface AuthToken {
-  accessToken: string;
-  refreshToken?: string;
-  expiresAt: number;
-  tokenType: string;
-  scope?: string;
-}
-```
+6. **Testability**: Components designed to be easily testable with mock dependencies.
 
-### WebhookEvent
-```typescript
-interface WebhookEvent {
-  id: string;
-  type: string;
-  timestamp: string;
-  tenantId: string;
-  payload: any;
-  signature?: string;
-}
-```
+7. **Scalability**: Architecture supports horizontal scaling for handling multiple clients.
 
-### APIRequest
-```typescript
-interface APIRequest {
-  method: string;
-  path: string;
-  query?: Record<string, string>;
-  headers?: Record<string, string>;
-  body?: any;
-}
-```
+## Technology Stack
 
-### APIResponse
-```typescript
-interface APIResponse {
-  statusCode: number;
-  headers: Record<string, string>;
-  body: any;
-}
-```
-
-## Security Considerations
-
-1. **Authentication Security**:
-   - Secure storage of credentials and tokens
-   - Token rotation and expiration
-   - Protection against token leakage
-
-2. **API Security**:
-   - Input validation and sanitization
-   - Rate limiting
-   - Error handling without information leakage
-
-3. **Webhook Security**:
-   - Signature verification
-   - HTTPS enforcement
-   - IP filtering (optional)
-
-## Error Handling
-
-1. **Error Types**:
-   - AuthenticationError
-   - APIError
-   - ValidationError
-   - ServerError
-
-2. **Error Response Format**:
-   ```json
-   {
-     "error": {
-       "code": "ERROR_CODE",
-       "message": "Human-readable error message",
-       "details": {}
-     }
-   }
-   ```
-
-3. **Logging**:
-   - Error logging with appropriate detail level
-   - Audit logging for security events
-   - Performance logging for monitoring
-
-## Configuration
-
-The server is configured through environment variables and/or configuration files:
-
-```
-AUTH_PROVIDERS=oauth2,jwt,apikey
-OAUTH2_CLIENT_ID=your-client-id
-OAUTH2_CLIENT_SECRET=your-client-secret
-OAUTH2_TOKEN_URL=https://your-tenant.us.qlikcloud.com/oauth/token
-API_BASE_URL=https://your-tenant.us.qlikcloud.com/api
-WEBHOOK_SECRET=your-webhook-secret
-LOG_LEVEL=info
-```
-
-## Scalability Considerations
-
-1. **Horizontal Scaling**:
-   - Stateless design for easy scaling
-   - Shared token storage for multi-instance deployments
-
-2. **Performance Optimization**:
-   - Connection pooling
-   - Caching of frequently used data
-   - Efficient error handling
-
-3. **Resilience**:
-   - Circuit breaking for external dependencies
-   - Retry mechanisms with exponential backoff
-   - Graceful degradation of functionality
+- **Node.js**: Runtime environment
+- **TypeScript**: Programming language
+- **Express**: Web framework
+- **WebSocket**: Real-time communication
+- **enigma.js**: Qlik Engine API client
+- **axios**: HTTP client for REST APIs
+- **jsonwebtoken**: JWT handling
+- **winston**: Logging

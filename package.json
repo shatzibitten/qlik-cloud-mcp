@@ -1,4 +1,8 @@
 {
+  "name": "qlik-cloud-mcp",
+  "version": "1.0.0",
+  "description": "Model Context Protocol server for Qlik Cloud API",
+  "main": "dist/server.js",
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
@@ -6,7 +10,7 @@
     "lint": "eslint . --ext .ts",
     "format": "prettier --write \"src/**/*.ts\"",
     "test": "jest",
-    "test:unit": "jest tests/auth tests/api tests/events",
+    "test:unit": "jest tests/auth tests/api tests/events tests/model",
     "test:user": "cd tests/user && ./run-user-tests.sh",
     "test:integration": "jest tests/user/integration-tests.js",
     "test:setup": "bash test/setup-test-env.sh",
@@ -21,7 +25,9 @@
     "helmet": "^5.1.0",
     "jsonwebtoken": "^8.5.1",
     "morgan": "^1.10.0",
-    "winston": "^3.8.1"
+    "winston": "^3.8.1",
+    "enigma.js": "^2.9.0",
+    "ws": "^8.8.1"
   },
   "devDependencies": {
     "@types/cors": "^2.8.12",
@@ -30,6 +36,7 @@
     "@types/jsonwebtoken": "^8.5.8",
     "@types/morgan": "^1.9.3",
     "@types/node": "^18.0.0",
+    "@types/ws": "^8.5.3",
     "@typescript-eslint/eslint-plugin": "^5.30.0",
     "@typescript-eslint/parser": "^5.30.0",
     "eslint": "^8.18.0",
@@ -39,10 +46,6 @@
     "ts-node-dev": "^2.0.0",
     "typescript": "^4.7.4"
   },
-  "name": "qlik-cloud-mcp",
-  "version": "1.0.0",
-  "description": "Message Control Protocol server for Qlik Cloud API",
-  "main": "dist/server.js",
   "author": "",
   "license": "MIT",
   "engines": {
