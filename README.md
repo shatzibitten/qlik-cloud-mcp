@@ -1,205 +1,88 @@
-# Qlik Cloud Model Context Protocol (MCP) Server
+# Qlik Cloud MCP (Model Context Protocol) Server
 
-A comprehensive server implementation for managing model context in Qlik Cloud applications using the Model Context Protocol.
+A Model Context Protocol server for the Qlik Cloud API that enables AI assistants to interact with Qlik Cloud resources and functionality.
 
 ## Overview
 
-The Qlik Cloud Model Context Protocol (MCP) Server provides a standardized way to manage model context across Qlik Cloud applications. It enables developers to create, manage, and synchronize analytical models with consistent state management, object tracking, and session handling.
+The Qlik Cloud MCP server implements the Model Context Protocol, allowing AI assistants like Claude Desktop and Cursor to access and manipulate Qlik Cloud resources. It provides a unified interface for managing model contexts, state persistence, and Qlik Cloud API integration.
 
 Key features:
-- Model context creation and management
-- State persistence and restoration
-- Object registry for tracking model objects
-- Real-time WebSocket communication
-- Integration with Qlik Cloud REST APIs
-- Authentication with OAuth2, JWT, and API keys
-- Docker support for easy deployment
-
-## Architecture
-
-The Qlik Cloud MCP Server is built with a modular architecture following SOLID and KISS principles:
-
-- **Model Context Module**: Manages model state, object tracking, and session handling
-- **Engine Communication Module**: Handles WebSocket connections to the Qlik Associative Engine
-- **Authentication Module**: Provides secure access with multiple authentication methods
-- **API Integration Module**: Connects with Qlik Cloud REST APIs
-- **Server Module**: Exposes REST and WebSocket endpoints for client interaction
-
-For more details, see the [Architecture Documentation](./docs/architecture.md).
+- **Model Context Management**: Create, retrieve, and manage model contexts for Qlik Cloud apps
+- **State Persistence**: Save and restore model states across sessions
+- **Qlik Cloud API Integration**: Access Qlik Cloud resources and functionality
+- **Claude Desktop Integration**: Extend Claude Desktop with Qlik Cloud capabilities
+- **Cursor AI Integration**: Use Qlik Cloud functionality directly from Cursor
 
 ## Installation
 
-### Prerequisites
-
-- Node.js 16 or later
-- npm 7 or later
-- Access to a Qlik Cloud tenant
-- Qlik Cloud API key or OAuth2 credentials
+See the [Installation Guide](./docs/installation.md) for detailed instructions on installing and configuring the Qlik Cloud MCP server.
 
 ### Quick Start
 
-1. Clone the repository:
 ```bash
-git clone https://github.com/shatzibitten/qlik-cloud-mcp.git
-cd qlik-cloud-mcp
-```
+# Install the package
+npm install @qlik-cloud-mcp/server
 
-2. Install dependencies:
-```bash
-npm install
-```
-
-3. Create a configuration file:
-```bash
+# Create a configuration file
 cp .env.example .env
-```
 
-4. Edit the `.env` file with your Qlik Cloud tenant information and credentials.
+# Edit the configuration file with your Qlik Cloud details
+nano .env
 
-5. Start the server:
-```bash
+# Start the server
 npm start
 ```
 
-For detailed installation instructions, see the [Installation Guide](./docs/installation.md).
+## Docker
 
-### Docker Installation
+The Qlik Cloud MCP server can be run in a Docker container. See the [Docker Deployment Guide](./docs/docker-deployment.md) for details.
 
-1. Pull the Docker image:
 ```bash
-docker pull shatzibitten/qlik-cloud-mcp:latest
+# Build and run with Docker
+./docker-run.sh
 ```
-
-2. Create a configuration file:
-```bash
-mkdir -p config
-cp .env.example config/.env
-```
-
-3. Edit the `config/.env` file with your Qlik Cloud tenant information and credentials.
-
-4. Run the container:
-```bash
-docker run -d -p 3000:3000 -v $(pwd)/config:/app/config --name qlik-cloud-mcp shatzibitten/qlik-cloud-mcp:latest
-```
-
-For more Docker options, see the [Docker Deployment Guide](./docs/docker-deployment.md).
-
-## Usage
-
-### Creating a Model Context
-
-```javascript
-// Using the REST API
-const response = await fetch('http://localhost:3000/api/v1/model/contexts', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'Authorization': 'Bearer YOUR_TOKEN'
-  },
-  body: JSON.stringify({
-    name: 'My Model Context',
-    appId: 'YOUR_APP_ID',
-    engineUrl: 'wss://your-tenant.us.qlikcloud.com/app/YOUR_APP_ID'
-  })
-});
-
-const context = await response.json();
-console.log('Created context:', context.id);
-```
-
-### Managing Model State
-
-```javascript
-// Save the current state
-const saveResponse = await fetch(`http://localhost:3000/api/v1/model/contexts/${contextId}/state`, {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'Authorization': 'Bearer YOUR_TOKEN'
-  },
-  body: JSON.stringify({
-    name: 'My Saved State'
-  })
-});
-
-const savedState = await saveResponse.json();
-console.log('Saved state:', savedState.id);
-
-// Restore a saved state
-await fetch(`http://localhost:3000/api/v1/model/contexts/${contextId}/state/${savedState.id}`, {
-  method: 'PUT',
-  headers: {
-    'Authorization': 'Bearer YOUR_TOKEN'
-  }
-});
-```
-
-### WebSocket Communication
-
-```javascript
-const ws = new WebSocket(`ws://localhost:3000/api/v1/model/ws?token=YOUR_TOKEN`);
-
-ws.onopen = () => {
-  // Subscribe to context events
-  ws.send(JSON.stringify({
-    type: 'subscribe',
-    contextId: 'YOUR_CONTEXT_ID'
-  }));
-  
-  // Create an object
-  ws.send(JSON.stringify({
-    type: 'create-object',
-    contextId: 'YOUR_CONTEXT_ID',
-    objectType: 'GenericObject',
-    properties: {
-      qInfo: {
-        qType: 'chart'
-      },
-      qHyperCubeDef: {
-        qDimensions: [...],
-        qMeasures: [...]
-      }
-    }
-  }));
-};
-
-ws.onmessage = (event) => {
-  const message = JSON.parse(event.data);
-  console.log('Received message:', message);
-};
-```
-
-For more usage examples, see the [API Reference](./docs/api-reference.md).
 
 ## Documentation
 
-- [Architecture](./docs/architecture.md)
-- [Installation](./docs/installation.md)
-- [Configuration](./docs/configuration.md)
-- [Authentication](./docs/authentication.md)
-- [API Reference](./docs/api-reference.md)
-- [Model Context](./docs/model-context.md)
-- [Docker Deployment](./docs/docker-deployment.md)
-- [Development](./docs/development.md)
-- [Troubleshooting](./docs/troubleshooting.md)
+- [Architecture](./docs/architecture.md): Overview of the system architecture
+- [Model Context](./docs/model-context.md): Details on model context management
+- [Authentication](./docs/authentication.md): Authentication methods and configuration
+- [API Reference](./docs/api-reference.md): API endpoints and usage
+- [Integrations](./docs/integrations.md): Claude Desktop and Cursor integration guide
+- [Docker Deployment](./docs/docker-deployment.md): Running in Docker
+- [Development](./docs/development.md): Development guide
+- [Troubleshooting](./docs/troubleshooting.md): Common issues and solutions
 
-## Contributing
+## Integrations
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+### Claude Desktop
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+The Qlik Cloud MCP server can be integrated with Claude Desktop to provide Qlik Cloud functionality directly within Claude's interface. See the [Integrations Guide](./docs/integrations.md#claude-desktop-integration) for setup instructions.
+
+### Cursor AI
+
+The Qlik Cloud MCP server can be integrated with Cursor AI to provide Qlik Cloud functionality within Cursor's code editor. See the [Integrations Guide](./docs/integrations.md#cursor-ai-integration) for setup instructions.
+
+## Development
+
+See the [Development Guide](./docs/development.md) for information on developing and extending the Qlik Cloud MCP server.
+
+## Testing
+
+```bash
+# Run unit tests
+npm test
+
+# Run integration tests
+npm run test:integration
+
+# Test Claude Desktop connectivity
+./tests/claude-desktop-connectivity-test.sh
+
+# Test Cursor connectivity
+./tests/cursor-connectivity-test.sh
+```
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- Qlik for providing the Qlik Cloud platform and APIs
-- The enigma.js team for their excellent library
-- All contributors who have helped with the development of this project
+MIT

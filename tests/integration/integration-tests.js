@@ -1,381 +1,445 @@
-const axios = require('axios');
-const WebSocket = require('ws');
-const fs = require('fs');
-const path = require('path');
+/**
+ * Integration tests for Claude Desktop and Cursor connectors
+ * 
+ * This file contains tests for verifying the functionality of the
+ * Claude Desktop and Cursor connectors for the Qlik Cloud MCP server.
+ */
 
-// Configuration
-const config = {
-  serverUrl: process.env.SERVER_URL || 'http://localhost:3000',
-  token: process.env.TOKEN || '',
-  outputDir: path.join(__dirname, '../../test-results/integration')
+import * as fs from 'fs';
+import * as path from 'path';
+import * as http from 'http';
+import * as assert from 'assert';
+import { Server } from '../src/server/server';
+import { ModelContextManager } from '../src/model/model-context-manager';
+import { AuthManager } from '../src/auth/auth-manager';
+import { LogManager } from '../src/utils/log-manager';
+import { ConfigManager } from '../src/config/config-manager';
+import { QlikCloudModelContextIntegration } from '../src/api/qlik-cloud-integration';
+import { ClaudeDesktopConnector } from '../src/integrations/claude-desktop-connector';
+import { CursorConnector } from '../src/integrations/cursor-connector';
+
+// Mock dependencies
+const mockLogger = {
+  info: console.log,
+  warn: console.warn,
+  error: console.error,
+  debug: console.log
 };
 
-// Ensure output directory exists
-if (!fs.existsSync(config.outputDir)) {
-  fs.mkdirSync(config.outputDir, { recursive: true });
-}
-
-// Logger
-const logger = {
-  info: (message) => {
-    console.log(`[INFO] ${message}`);
-    fs.appendFileSync(path.join(config.outputDir, 'test.log'), `[INFO] ${message}\n`);
-  },
-  error: (message, error) => {
-    console.error(`[ERROR] ${message}`, error);
-    fs.appendFileSync(path.join(config.outputDir, 'test.log'), `[ERROR] ${message} ${error}\n`);
-  },
-  success: (message) => {
-    console.log(`[SUCCESS] ${message}`);
-    fs.appendFileSync(path.join(config.outputDir, 'test.log'), `[SUCCESS] ${message}\n`);
-  }
-};
-
-// API client
-const api = {
-  async request(method, endpoint, data = null) {
-    try {
-      const headers = {
-        'Content-Type': 'application/json'
-      };
-      
-      if (config.token) {
-        headers['Authorization'] = `Bearer ${config.token}`;
-      }
-      
-      const response = await axios({
-        method,
-        url: `${config.serverUrl}${endpoint}`,
-        headers,
-        data
-      });
-      
-      return response.data;
-    } catch (error) {
-      logger.error(`API request failed: ${method} ${endpoint}`, error.message);
-      throw error;
-    }
-  },
-  
-  async getHealth() {
-    return this.request('get', '/health');
-  },
-  
-  async listContexts() {
-    return this.request('get', '/api/v1/model/contexts');
-  },
-  
-  async createContext(context) {
-    return this.request('post', '/api/v1/model/contexts', context);
-  },
-  
-  async getContext(contextId) {
-    return this.request('get', `/api/v1/model/contexts/${contextId}`);
-  },
-  
-  async deleteContext(contextId) {
-    return this.request('delete', `/api/v1/model/contexts/${contextId}`);
-  },
-  
-  async connectContext(contextId) {
-    return this.request('post', `/api/v1/model/contexts/${contextId}/connect`);
-  },
-  
-  async disconnectContext(contextId) {
-    return this.request('post', `/api/v1/model/contexts/${contextId}/disconnect`);
-  },
-  
-  async saveState(contextId, state) {
-    return this.request('post', `/api/v1/model/contexts/${contextId}/state`, state);
-  },
-  
-  async listStates(contextId) {
-    return this.request('get', `/api/v1/model/contexts/${contextId}/state`);
-  },
-  
-  async getState(contextId, stateId) {
-    return this.request('get', `/api/v1/model/contexts/${contextId}/state/${stateId}`);
-  },
-  
-  async restoreState(contextId, stateId) {
-    return this.request('put', `/api/v1/model/contexts/${contextId}/state/${stateId}`);
-  },
-  
-  async createObject(contextId, object) {
-    return this.request('post', `/api/v1/model/contexts/${contextId}/objects`, object);
-  },
-  
-  async listObjects(contextId) {
-    return this.request('get', `/api/v1/model/contexts/${contextId}/objects`);
-  },
-  
-  async getObject(contextId, objectHandle) {
-    return this.request('get', `/api/v1/model/contexts/${contextId}/objects/${objectHandle}`);
-  },
-  
-  async deleteObject(contextId, objectHandle) {
-    return this.request('delete', `/api/v1/model/contexts/${contextId}/objects/${objectHandle}`);
-  },
-  
-  async executeMethod(contextId, objectHandle, method, params = []) {
-    return this.request('post', `/api/v1/model/contexts/${contextId}/objects/${objectHandle}/method`, {
-      method,
-      params
-    });
+const mockConfig = {
+  get: (key: string, defaultValue?: any) => {
+    const config: any = {
+      'server.port': 3000,
+      'server.host': 'localhost',
+      'qlikCloud.baseUrl': 'https://test-tenant.us.qlikcloud.com',
+      'qlikCloud.tenantId': 'test-tenant',
+      'qlikCloud.authType': 'oauth2'
+    };
+    return config[key] || defaultValue;
   }
 };
 
-// WebSocket client
-class WebSocketClient {
-  constructor(url, token) {
-    this.url = url;
-    this.token = token;
-    this.ws = null;
-    this.messageHandlers = [];
-    this.connected = false;
-  }
-  
-  connect() {
-    return new Promise((resolve, reject) => {
-      const wsUrl = `${this.url}?token=${this.token}`;
-      this.ws = new WebSocket(wsUrl);
-      
-      this.ws.on('open', () => {
-        logger.info('WebSocket connected');
-        this.connected = true;
-        resolve();
-      });
-      
-      this.ws.on('message', (data) => {
-        const message = JSON.parse(data);
-        logger.info(`WebSocket message received: ${JSON.stringify(message)}`);
-        
-        this.messageHandlers.forEach(handler => {
-          if (handler.type === message.type) {
-            handler.callback(message);
-          }
-        });
-      });
-      
-      this.ws.on('error', (error) => {
-        logger.error('WebSocket error', error);
-        reject(error);
-      });
-      
-      this.ws.on('close', () => {
-        logger.info('WebSocket closed');
-        this.connected = false;
-      });
-    });
-  }
-  
-  send(message) {
-    if (!this.connected) {
-      throw new Error('WebSocket not connected');
-    }
-    
-    this.ws.send(JSON.stringify(message));
-  }
-  
-  onMessage(type, callback) {
-    this.messageHandlers.push({ type, callback });
-  }
-  
-  close() {
-    if (this.ws) {
-      this.ws.close();
-    }
-  }
-}
+const mockAuthManager = {
+  getProvider: () => ({
+    getToken: async () => 'test-token'
+  }),
+  on: () => {}
+};
 
-// Test runner
+const mockContextManager = {
+  createContext: async () => ({
+    id: 'test-context-id',
+    name: 'Test Context',
+    description: 'Test context for integration testing',
+    getMetadata: () => ({
+      id: 'test-context-id',
+      name: 'Test Context',
+      description: 'Test context for integration testing'
+    }),
+    saveState: async () => ({ id: 'test-state-id' }),
+    restoreState: async () => true
+  }),
+  getContext: () => ({
+    id: 'test-context-id',
+    name: 'Test Context',
+    description: 'Test context for integration testing',
+    getMetadata: () => ({
+      id: 'test-context-id',
+      name: 'Test Context',
+      description: 'Test context for integration testing'
+    }),
+    saveState: async () => ({ id: 'test-state-id' }),
+    restoreState: async () => true
+  }),
+  listContexts: () => [
+    {
+      id: 'test-context-id',
+      name: 'Test Context',
+      description: 'Test context for integration testing'
+    }
+  ],
+  deleteContext: async () => true,
+  on: () => {}
+};
+
+const mockQlikCloudIntegration = {
+  clients: {
+    appClient: {
+      getApps: async () => [
+        {
+          id: 'test-app-id',
+          name: 'Test App',
+          description: 'Test app for integration testing'
+        }
+      ],
+      getApp: async () => ({
+        id: 'test-app-id',
+        name: 'Test App',
+        description: 'Test app for integration testing'
+      })
+    }
+  }
+};
+
+// Test configuration
+const testConfig = {
+  claudeDesktop: {
+    serverName: 'qlik-cloud-mcp',
+    port: 3000,
+    qlikCloudBaseUrl: 'https://test-tenant.us.qlikcloud.com',
+    qlikCloudTenantId: 'test-tenant',
+    authType: 'oauth2'
+  },
+  cursor: {
+    apiKey: 'test-api-key',
+    anthropicBaseUrl: 'https://api.anthropic.com',
+    anthropicApiVersion: '2023-06-01',
+    defaultModel: 'claude-3-sonnet-20240229',
+    maxTokens: 4096
+  }
+};
+
+// Temporary file path for Claude Desktop config
+const tempConfigPath = path.join(__dirname, 'temp_claude_desktop_config.json');
+
+/**
+ * Run the integration tests
+ */
 async function runTests() {
-  let contextId = null;
-  let stateId = null;
-  let objectHandle = null;
+  console.log('Starting integration tests for Claude Desktop and Cursor connectors...');
+  
+  // Create a server instance
+  const server = new Server(
+    mockLogger as any,
+    mockConfig as any,
+    mockAuthManager as any
+  );
+  
+  // Initialize the server
+  await server.initialize();
   
   try {
-    // Test 1: Check server health
-    logger.info('Test 1: Checking server health');
-    const health = await api.getHealth();
-    logger.success('Server health check passed');
-    fs.writeFileSync(path.join(config.outputDir, 'health.json'), JSON.stringify(health, null, 2));
+    // Test Claude Desktop connector
+    await testClaudeDesktopConnector(server);
     
-    // Skip remaining tests if no token is provided
-    if (!config.token) {
-      logger.info('Skipping remaining tests because no token is provided');
-      return;
-    }
+    // Test Cursor connector
+    await testCursorConnector(server);
     
-    // Test 2: Create context
-    logger.info('Test 2: Creating model context');
-    const contextData = {
-      name: 'Integration Test Context',
-      description: 'Context created for integration testing',
-      appId: 'test-app-id',
-      engineUrl: 'wss://your-tenant.us.qlikcloud.com/app/test-app-id'
-    };
-    
-    const createContextResponse = await api.createContext(contextData);
-    contextId = createContextResponse.data.id;
-    logger.success(`Context created with ID: ${contextId}`);
-    fs.writeFileSync(path.join(config.outputDir, 'create-context.json'), JSON.stringify(createContextResponse, null, 2));
-    
-    // Test 3: Get context
-    logger.info('Test 3: Getting model context');
-    const getContextResponse = await api.getContext(contextId);
-    logger.success('Context retrieved successfully');
-    fs.writeFileSync(path.join(config.outputDir, 'get-context.json'), JSON.stringify(getContextResponse, null, 2));
-    
-    // Test 4: Connect to engine
-    logger.info('Test 4: Connecting to engine');
-    const connectResponse = await api.connectContext(contextId);
-    logger.success('Connected to engine successfully');
-    fs.writeFileSync(path.join(config.outputDir, 'connect.json'), JSON.stringify(connectResponse, null, 2));
-    
-    // Test 5: Save state
-    logger.info('Test 5: Saving state');
-    const stateData = {
-      name: 'Integration Test State',
-      description: 'State created for integration testing'
-    };
-    
-    const saveStateResponse = await api.saveState(contextId, stateData);
-    stateId = saveStateResponse.data.id;
-    logger.success(`State saved with ID: ${stateId}`);
-    fs.writeFileSync(path.join(config.outputDir, 'save-state.json'), JSON.stringify(saveStateResponse, null, 2));
-    
-    // Test 6: List states
-    logger.info('Test 6: Listing states');
-    const listStatesResponse = await api.listStates(contextId);
-    logger.success(`Found ${listStatesResponse.data.states.length} states`);
-    fs.writeFileSync(path.join(config.outputDir, 'list-states.json'), JSON.stringify(listStatesResponse, null, 2));
-    
-    // Test 7: Get state
-    logger.info('Test 7: Getting state');
-    const getStateResponse = await api.getState(contextId, stateId);
-    logger.success('State retrieved successfully');
-    fs.writeFileSync(path.join(config.outputDir, 'get-state.json'), JSON.stringify(getStateResponse, null, 2));
-    
-    // Test 8: Create object
-    logger.info('Test 8: Creating object');
-    const objectData = {
-      objectType: 'GenericObject',
-      properties: {
-        qInfo: {
-          qType: 'test-object'
-        },
-        testProperty: 'test-value'
-      }
-    };
-    
-    const createObjectResponse = await api.createObject(contextId, objectData);
-    objectHandle = createObjectResponse.data.handle;
-    logger.success(`Object created with handle: ${objectHandle}`);
-    fs.writeFileSync(path.join(config.outputDir, 'create-object.json'), JSON.stringify(createObjectResponse, null, 2));
-    
-    // Test 9: List objects
-    logger.info('Test 9: Listing objects');
-    const listObjectsResponse = await api.listObjects(contextId);
-    logger.success(`Found ${listObjectsResponse.data.objects.length} objects`);
-    fs.writeFileSync(path.join(config.outputDir, 'list-objects.json'), JSON.stringify(listObjectsResponse, null, 2));
-    
-    // Test 10: Get object
-    logger.info('Test 10: Getting object');
-    const getObjectResponse = await api.getObject(contextId, objectHandle);
-    logger.success('Object retrieved successfully');
-    fs.writeFileSync(path.join(config.outputDir, 'get-object.json'), JSON.stringify(getObjectResponse, null, 2));
-    
-    // Test 11: Execute method
-    logger.info('Test 11: Executing method');
-    const executeMethodResponse = await api.executeMethod(contextId, objectHandle, 'getProperties');
-    logger.success('Method executed successfully');
-    fs.writeFileSync(path.join(config.outputDir, 'execute-method.json'), JSON.stringify(executeMethodResponse, null, 2));
-    
-    // Test 12: Restore state
-    logger.info('Test 12: Restoring state');
-    const restoreStateResponse = await api.restoreState(contextId, stateId);
-    logger.success('State restored successfully');
-    fs.writeFileSync(path.join(config.outputDir, 'restore-state.json'), JSON.stringify(restoreStateResponse, null, 2));
-    
-    // Test 13: WebSocket communication
-    logger.info('Test 13: Testing WebSocket communication');
-    const wsUrl = `ws://${config.serverUrl.replace(/^https?:\/\//, '')}/api/v1/model/ws`;
-    const wsClient = new WebSocketClient(wsUrl, config.token);
-    
-    await wsClient.connect();
-    
-    // Subscribe to context events
-    wsClient.send({
-      type: 'subscribe',
-      contextId
-    });
-    
-    // Wait for subscription confirmation
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // Create object via WebSocket
-    const wsObjectData = {
-      type: 'create-object',
-      contextId,
-      objectType: 'GenericObject',
-      properties: {
-        qInfo: {
-          qType: 'ws-test-object'
-        },
-        testProperty: 'ws-test-value'
-      }
-    };
-    
-    let wsObjectHandle = null;
-    
-    wsClient.onMessage('object-created', (message) => {
-      wsObjectHandle = message.objectHandle;
-      logger.success(`Object created via WebSocket with handle: ${wsObjectHandle}`);
-      fs.writeFileSync(path.join(config.outputDir, 'ws-object-created.json'), JSON.stringify(message, null, 2));
-    });
-    
-    wsClient.send(wsObjectData);
-    
-    // Wait for object creation
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    // Close WebSocket
-    wsClient.close();
-    logger.success('WebSocket communication test completed');
-    
-    // Test 14: Disconnect from engine
-    logger.info('Test 14: Disconnecting from engine');
-    const disconnectResponse = await api.disconnectContext(contextId);
-    logger.success('Disconnected from engine successfully');
-    fs.writeFileSync(path.join(config.outputDir, 'disconnect.json'), JSON.stringify(disconnectResponse, null, 2));
-    
-    // Test 15: Delete context
-    logger.info('Test 15: Deleting context');
-    const deleteContextResponse = await api.deleteContext(contextId);
-    logger.success('Context deleted successfully');
-    fs.writeFileSync(path.join(config.outputDir, 'delete-context.json'), JSON.stringify(deleteContextResponse, null, 2));
-    
-    logger.success('All integration tests passed!');
+    console.log('All integration tests passed!');
   } catch (error) {
-    logger.error('Test failed', error);
-    
-    // Cleanup if error occurs
-    try {
-      if (contextId) {
-        await api.deleteContext(contextId);
-        logger.info('Cleaned up context after error');
-      }
-    } catch (cleanupError) {
-      logger.error('Failed to clean up after error', cleanupError);
-    }
-    
+    console.error('Integration tests failed:', error);
     process.exit(1);
+  } finally {
+    // Clean up
+    await server.stop();
+    if (fs.existsSync(tempConfigPath)) {
+      fs.unlinkSync(tempConfigPath);
+    }
   }
 }
 
-// Run tests
-runTests().catch(error => {
-  logger.error('Unhandled error', error);
-  process.exit(1);
-});
+/**
+ * Test the Claude Desktop connector
+ */
+async function testClaudeDesktopConnector(server: Server) {
+  console.log('Testing Claude Desktop connector...');
+  
+  // Create a Claude Desktop connector
+  const claudeDesktopConnector = new ClaudeDesktopConnector(
+    server,
+    mockContextManager as any,
+    mockAuthManager as any,
+    mockLogger as any,
+    mockConfig as any,
+    mockQlikCloudIntegration as any,
+    testConfig.claudeDesktop
+  );
+  
+  // Test generating Claude Desktop config
+  const config = claudeDesktopConnector.generateClaudeDesktopConfig();
+  assert.strictEqual(typeof config, 'object', 'Config should be an object');
+  assert.strictEqual(
+    typeof config[testConfig.claudeDesktop.serverName],
+    'object',
+    'Config should contain server entry'
+  );
+  
+  // Test updating Claude Desktop config
+  const updateResult = claudeDesktopConnector.updateClaudeDesktopConfig(tempConfigPath);
+  assert.strictEqual(updateResult, true, 'Config update should succeed');
+  
+  // Verify the config file was created
+  assert.strictEqual(
+    fs.existsSync(tempConfigPath),
+    true,
+    'Config file should exist'
+  );
+  
+  // Read the config file and verify its contents
+  const configContent = fs.readFileSync(tempConfigPath, 'utf8');
+  const parsedConfig = JSON.parse(configContent);
+  assert.strictEqual(
+    typeof parsedConfig[testConfig.claudeDesktop.serverName],
+    'object',
+    'Config file should contain server entry'
+  );
+  
+  // Test removing from Claude Desktop config
+  const removeResult = claudeDesktopConnector.removeFromClaudeDesktopConfig(tempConfigPath);
+  assert.strictEqual(removeResult, true, 'Config removal should succeed');
+  
+  // Read the config file again and verify the entry was removed
+  const updatedConfigContent = fs.readFileSync(tempConfigPath, 'utf8');
+  const updatedParsedConfig = JSON.parse(updatedConfigContent);
+  assert.strictEqual(
+    updatedParsedConfig[testConfig.claudeDesktop.serverName],
+    undefined,
+    'Server entry should be removed from config'
+  );
+  
+  // Test MCP manifest endpoint
+  const manifestResponse = await makeRequest(
+    'GET',
+    `http://localhost:${server.port}/mcp-manifest.json`
+  );
+  
+  assert.strictEqual(manifestResponse.statusCode, 200, 'Manifest endpoint should return 200');
+  
+  const manifestBody = JSON.parse(manifestResponse.body);
+  assert.strictEqual(
+    manifestBody.name,
+    testConfig.claudeDesktop.serverName,
+    'Manifest should contain correct server name'
+  );
+  assert.strictEqual(
+    Array.isArray(manifestBody.tools),
+    true,
+    'Manifest should contain tools array'
+  );
+  
+  console.log('Claude Desktop connector tests passed!');
+}
+
+/**
+ * Test the Cursor connector
+ */
+async function testCursorConnector(server: Server) {
+  console.log('Testing Cursor connector...');
+  
+  // Create a Cursor connector
+  const cursorConnector = new CursorConnector(
+    server,
+    mockContextManager as any,
+    mockAuthManager as any,
+    mockLogger as any,
+    mockConfig as any,
+    mockQlikCloudIntegration as any,
+    testConfig.cursor
+  );
+  
+  // Test Anthropic API URL
+  const apiUrl = cursorConnector.getAnthropicApiUrl();
+  assert.strictEqual(
+    typeof apiUrl,
+    'string',
+    'API URL should be a string'
+  );
+  assert.strictEqual(
+    apiUrl.includes('/anthropic'),
+    true,
+    'API URL should contain /anthropic'
+  );
+  
+  // Test generating Cursor instructions
+  const instructions = cursorConnector.generateCursorInstructions();
+  assert.strictEqual(
+    typeof instructions,
+    'string',
+    'Instructions should be a string'
+  );
+  assert.strictEqual(
+    instructions.includes(apiUrl),
+    true,
+    'Instructions should contain API URL'
+  );
+  
+  // Test models endpoint
+  const modelsResponse = await makeRequest(
+    'GET',
+    `http://localhost:${server.port}/anthropic/v1/models`,
+    {
+      'x-api-key': testConfig.cursor.apiKey
+    }
+  );
+  
+  assert.strictEqual(modelsResponse.statusCode, 200, 'Models endpoint should return 200');
+  
+  const modelsBody = JSON.parse(modelsResponse.body);
+  assert.strictEqual(
+    Array.isArray(modelsBody.models),
+    true,
+    'Response should contain models array'
+  );
+  
+  // Test messages endpoint
+  const messagesResponse = await makeRequest(
+    'POST',
+    `http://localhost:${server.port}/anthropic/v1/messages`,
+    {
+      'x-api-key': testConfig.cursor.apiKey,
+      'Content-Type': 'application/json'
+    },
+    JSON.stringify({
+      model: testConfig.cursor.defaultModel,
+      messages: [
+        {
+          role: 'user',
+          content: 'Hello, world!'
+        }
+      ]
+    })
+  );
+  
+  assert.strictEqual(messagesResponse.statusCode, 200, 'Messages endpoint should return 200');
+  
+  const messagesBody = JSON.parse(messagesResponse.body);
+  assert.strictEqual(
+    messagesBody.role,
+    'assistant',
+    'Response should have assistant role'
+  );
+  
+  // Test messages endpoint with Qlik tool
+  const qlikToolResponse = await makeRequest(
+    'POST',
+    `http://localhost:${server.port}/anthropic/v1/messages`,
+    {
+      'x-api-key': testConfig.cursor.apiKey,
+      'Content-Type': 'application/json'
+    },
+    JSON.stringify({
+      model: testConfig.cursor.defaultModel,
+      messages: [
+        {
+          role: 'user',
+          content: 'List all Qlik apps'
+        }
+      ],
+      tools: [
+        {
+          name: 'qlik_list_apps'
+        }
+      ]
+    })
+  );
+  
+  assert.strictEqual(qlikToolResponse.statusCode, 200, 'Qlik tool endpoint should return 200');
+  
+  const qlikToolBody = JSON.parse(qlikToolResponse.body);
+  assert.strictEqual(
+    Array.isArray(qlikToolBody.tool_results),
+    true,
+    'Response should contain tool_results array'
+  );
+  
+  // Test completions endpoint
+  const completionsResponse = await makeRequest(
+    'POST',
+    `http://localhost:${server.port}/anthropic/v1/complete`,
+    {
+      'x-api-key': testConfig.cursor.apiKey,
+      'Content-Type': 'application/json'
+    },
+    JSON.stringify({
+      model: testConfig.cursor.defaultModel,
+      prompt: 'Human: Hello, world!\n\nAssistant:'
+    })
+  );
+  
+  assert.strictEqual(completionsResponse.statusCode, 200, 'Completions endpoint should return 200');
+  
+  const completionsBody = JSON.parse(completionsResponse.body);
+  assert.strictEqual(
+    typeof completionsBody.completion,
+    'string',
+    'Response should contain completion string'
+  );
+  
+  // Test authentication failure
+  const authFailureResponse = await makeRequest(
+    'GET',
+    `http://localhost:${server.port}/anthropic/v1/models`,
+    {
+      'x-api-key': 'invalid-api-key'
+    }
+  );
+  
+  assert.strictEqual(authFailureResponse.statusCode, 401, 'Invalid API key should return 401');
+  
+  console.log('Cursor connector tests passed!');
+}
+
+/**
+ * Make an HTTP request
+ */
+function makeRequest(
+  method: string,
+  url: string,
+  headers: Record<string, string> = {},
+  body?: string
+): Promise<{ statusCode: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const options = {
+      method,
+      headers
+    };
+    
+    const req = http.request(url, options, (res) => {
+      let responseBody = '';
+      
+      res.on('data', (chunk) => {
+        responseBody += chunk;
+      });
+      
+      res.on('end', () => {
+        resolve({
+          statusCode: res.statusCode || 0,
+          body: responseBody
+        });
+      });
+    });
+    
+    req.on('error', (error) => {
+      reject(error);
+    });
+    
+    if (body) {
+      req.write(body);
+    }
+    
+    req.end();
+  });
+}
+
+// Run the tests
+runTests().catch(console.error);
